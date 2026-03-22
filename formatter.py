@@ -3,7 +3,6 @@ from zoneinfo import ZoneInfo
 
 from leetcode import (
     DIFFICULTY_EMOJI,
-    compute_diff,
     fetch_question_difficulties,
     filter_today_accepted,
     get_snapshot,
@@ -63,15 +62,21 @@ async def format_summary(
             lines.append(f"  _No baseline yet \\- tracking starts tomorrow_\n")
             continue
 
-        snapshot = snapshot_data["counts"]
-        diff = compute_diff(counts, snapshot)
-        solved_today = sum(diff.values())
-
         today_subs = user_today_subs.get(username, [])
+
+        # Derive count and difficulty breakdown from the actual submissions list
+        # to avoid latency in LeetCode's aggregate acSubmissionNum stat
+        diff_from_subs = {"Easy": 0, "Medium": 0, "Hard": 0}
+        for sub in today_subs:
+            slug = sub.get("titleSlug", "")
+            difficulty = difficulties.get(slug, "")
+            if difficulty in diff_from_subs:
+                diff_from_subs[difficulty] += 1
+        solved_today = sum(diff_from_subs.values())
 
         header = f"*{_esc(username)}*: *{solved_today}* solved {snapshot_label}"
         if solved_today > 0:
-            header += f" \\({_emoji_counts(diff)}\\)"
+            header += f" \\({_emoji_counts(diff_from_subs)}\\)"
 
         lines.append(header)
 
