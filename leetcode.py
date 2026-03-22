@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from datetime import datetime, time
+from typing import Optional
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -21,7 +22,7 @@ def _parse_ac_counts(ac_submission_num: list[dict]) -> dict[str, int]:
     return counts
 
 
-async def fetch_user_profile(username: str) -> dict | None:
+async def fetch_user_profile(username: str) -> Optional[dict]:
     """Fetch a user's profile and recent submissions from LeetCode.
 
     Returns None if the user doesn't exist or profile is private.
@@ -63,14 +64,17 @@ def _today_str(tz: ZoneInfo) -> str:
 
 
 def take_snapshot(chat_id: str, username: str, counts: dict[str, int], tz: ZoneInfo) -> None:
+    """Take a snapshot with current timestamp."""
     date_str = _today_str(tz)
-    storage.save_snapshot(chat_id, username, date_str, counts)
+    timestamp = int(datetime.now(tz).timestamp())
+    storage.save_snapshot(chat_id, username, date_str, counts, timestamp)
 
 
-def get_snapshot(chat_id: str, username: str, tz: ZoneInfo) -> dict[str, int] | None:
+def get_snapshot(chat_id: str, username: str, tz: ZoneInfo) -> Optional[dict]:
+    """Return snapshot dict with 'counts' and 'timestamp' keys, or None."""
     date_str = _today_str(tz)
-    snaps = storage.load_snapshots(chat_id, date_str)
-    return snaps.get(username)
+    snapshots = storage.load_snapshots(chat_id, date_str)
+    return snapshots.get(username)
 
 
 def compute_diff(current: dict[str, int], snapshot: dict[str, int]) -> dict[str, int]:
@@ -109,18 +113,22 @@ async def fetch_question_difficulties(slugs: list[str]) -> dict[str, str]:
         return {}
 
 
-def filter_today_accepted(recent: list[dict], tz: ZoneInfo) -> list[dict]:
-    """Return deduplicated accepted submissions from today."""
-    now = datetime.now(tz)
-    today_start = datetime.combine(now.date(), time.min, tzinfo=tz)
-    today_ts = int(today_start.timestamp())
+def filter_today_accepted(recent: list[dict], tz: ZoneInfo, cutoff_ts: Optional[int] = None) -> list[dict]:
+    """Return deduplicated accepted submissions from cutoff time onwards.
+
+    If cutoff_ts is not provided, defaults to midnight of current day.
+    """
+    if cutoff_ts is None:
+        now = datetime.now(tz)
+        today_start = datetime.combine(now.date(), time.min, tzinfo=tz)
+        cutoff_ts = int(today_start.timestamp())
 
     seen = set()
     result = []
     for sub in recent:
         if sub.get("statusDisplay") != "Accepted":
             continue
-        if int(sub.get("timestamp", 0)) < today_ts:
+        if int(sub.get("timestamp", 0)) < cutoff_ts:
             continue
         slug = sub.get("titleSlug")
         if slug in seen:
@@ -130,7 +138,7 @@ def filter_today_accepted(recent: list[dict], tz: ZoneInfo) -> list[dict]:
     return result
 
 
-async def fetch_all_users(usernames: list[str]) -> dict[str, dict | None]:
+async def fetch_all_users(usernames: list[str]) -> dict[str, Optional[dict]]:
     """Fetch profiles for multiple users with rate-limiting delay."""
     results = {}
     for i, username in enumerate(usernames):

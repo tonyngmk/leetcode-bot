@@ -1,3 +1,4 @@
+from typing import Optional
 from zoneinfo import ZoneInfo
 
 from leetcode import (
@@ -11,7 +12,7 @@ from leetcode import (
 
 async def format_summary(
     chat_id: str,
-    profiles: dict[str, dict | None],
+    profiles: dict[str, Optional[dict]],
     tz: ZoneInfo,
     snapshot_label: str = "today",
 ) -> str:
@@ -21,11 +22,20 @@ async def format_summary(
     # Collect all slugs from today's submissions across all users to batch-fetch difficulties
     all_slugs: set[str] = set()
     user_today_subs: dict[str, list[dict]] = {}
+    user_cutoffs: dict[str, int] = {}
     for username, profile in profiles.items():
         if profile is None:
             continue
-        subs = filter_today_accepted(profile["recent"], tz)
+
+        # Get snapshot to determine cutoff time
+        snapshot_data = get_snapshot(chat_id, username, tz)
+        cutoff_ts = snapshot_data["timestamp"] if snapshot_data else None
+
+        subs = filter_today_accepted(profile["recent"], tz, cutoff_ts)
         user_today_subs[username] = subs
+        if cutoff_ts:
+            user_cutoffs[username] = cutoff_ts
+
         for sub in subs:
             slug = sub.get("titleSlug")
             if slug:
@@ -41,18 +51,19 @@ async def format_summary(
             continue
 
         counts = profile["counts"]
-        snapshot = get_snapshot(chat_id, username, tz)
+        snapshot_data = get_snapshot(chat_id, username, tz)
 
-        if snapshot is None:
+        if snapshot_data is None:
             total = sum(counts.values())
             diff_parts = _emoji_counts(counts)
             lines.append(
                 f"*{_esc(username)}*: {total} total solved "
                 f"\\({diff_parts}\\)"
             )
-            lines.append(f"  _No baseline yet \\(since bot restart\\)_\n")
+            lines.append(f"  _No baseline yet \\- tracking starts tomorrow_\n")
             continue
 
+        snapshot = snapshot_data["counts"]
         diff = compute_diff(counts, snapshot)
         solved_today = sum(diff.values())
 

@@ -31,7 +31,7 @@ def _tz(chat_id: str) -> ZoneInfo:
 
 
 async def _take_initial_snapshots(chat_id: str, usernames: list[str]) -> None:
-    """Take snapshots, reusing any persisted snapshots for today."""
+    """Take snapshots for all users."""
     tz = _tz(chat_id)
     today = datetime.now(tz).strftime("%Y-%m-%d")
     existing = storage.load_snapshots(chat_id, today)

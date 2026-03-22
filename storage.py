@@ -1,6 +1,9 @@
 import json
 import logging
 import os
+from datetime import datetime
+from typing import Optional
+from zoneinfo import ZoneInfo
 
 from config import DEFAULT_TIMEZONE, STATE_FILE
 
@@ -82,17 +85,54 @@ def get_timezone(chat_id: str) -> str:
     return get_chat(chat_id).get("timezone", DEFAULT_TIMEZONE)
 
 
-def save_snapshot(chat_id: str, username: str, date_str: str, counts: dict[str, int]) -> None:
-    """Persist a snapshot under snapshots.<date>.<username> for the chat."""
+def save_snapshot(
+    chat_id: str,
+    username: str,
+    date_str: str,
+    counts: dict[str, int],
+    timestamp: Optional[int] = None,
+) -> None:
+    """Persist a snapshot with timestamp.
+
+    If timestamp is not provided, uses current time.
+    """
+    if timestamp is None:
+        timestamp = int(datetime.now().timestamp())
+
     data = _load()
     chat = _ensure_chat(data, chat_id)
     snapshots = chat.setdefault("snapshots", {})
     day = snapshots.setdefault(date_str, {})
-    day[username] = dict(counts)
+    day[username] = {
+        "counts": dict(counts),
+        "timestamp": timestamp,
+    }
     _save(data)
 
 
-def load_snapshots(chat_id: str, date_str: str) -> dict[str, dict[str, int]]:
-    """Return {username: {Easy, Medium, Hard}} for the given date, or {} if none."""
+def load_snapshots(chat_id: str, date_str: str) -> dict[str, dict]:
+    """Return {username: {'counts': {...}, 'timestamp': int}} for the given date.
+
+    Handles both old format (just counts dict) and new format (dict with counts/timestamp).
+    For old format, uses midnight timestamp for backwards compatibility.
+    """
+    tz = ZoneInfo(get_timezone(chat_id))
     chat = get_chat(chat_id)
-    return chat.get("snapshots", {}).get(date_str, {})
+    raw_snapshots = chat.get("snapshots", {}).get(date_str, {})
+
+    result = {}
+    for username, data in raw_snapshots.items():
+        # Handle old format (just counts dict)
+        if isinstance(data, dict) and "timestamp" not in data:
+            # Backwards compat: assume midnight for old snapshots
+            date_obj = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=tz)
+            midnight_ts = int(date_obj.timestamp())
+            result[username] = {
+                "counts": data,  # Old format has counts directly
+                "timestamp": midnight_ts,
+            }
+        else:
+            # New format
+            result[username] = data
+
+    return result
