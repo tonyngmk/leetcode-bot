@@ -43,20 +43,17 @@ async def format_daily(
             if slug:
                 all_slugs.add(slug)
 
-        # Compute difficulty breakdown
-        diff_from_subs = {"Easy": 0, "Medium": 0, "Hard": 0}
-        solved_today = len(subs)
-        user_rows.append((username, profile, solved_today, diff_from_subs, subs, snapshot_data))
+        # Use snapshot diff for accurate count and difficulty breakdown
+        if snapshot_data:
+            diff_breakdown = compute_diff(profile["counts"], snapshot_data["counts"])
+            solved_today = sum(diff_breakdown.values())
+        else:
+            diff_breakdown = {"Easy": 0, "Medium": 0, "Hard": 0}
+            solved_today = 0
+
+        user_rows.append((username, profile, solved_today, diff_breakdown, subs, snapshot_data))
 
     difficulties = await fetch_question_difficulties(list(all_slugs))
-
-    # Fill in difficulty counts
-    for i, (username, profile, solved_today, diff_from_subs, subs, snapshot_data) in enumerate(user_rows):
-        for sub in subs:
-            slug = sub.get("titleSlug", "")
-            difficulty = difficulties.get(slug, "")
-            if difficulty in diff_from_subs:
-                diff_from_subs[difficulty] += 1
 
     # Sort: by solved_today descending, then alphabetically. Users with no snapshot sort to bottom.
     user_rows.sort(key=lambda x: (0 if x[5] is not None else 1, -x[2], x[0].lower()))
@@ -93,6 +90,11 @@ async def format_daily(
                 prefix = f"{emoji} " if emoji else ""
                 lines.append(f"  {prefix}[{title}](https://leetcode.com/problems/{slug}/)")
 
+            # Overflow note if snapshot diff > shown list
+            if solved_today > len(subs):
+                overflow = solved_today - len(subs)
+                lines.append(f"  _\+{overflow} more not shown_")
+
         lines.append("")
 
     # Append bar chart
@@ -109,69 +111,41 @@ async def format_leaderboard(
     profiles: dict[str, Optional[dict]],
     tz: ZoneInfo,
 ) -> str:
-    """Format compact dual-ranking leaderboard (daily + weekly) with consistent counting."""
+    """Format compact dual-ranking leaderboard (daily + weekly) with snapshot-diff counts."""
     if not profiles:
         return "No users are being tracked. Use /add_user <username> to add one."
 
-    # Collect both daily and weekly subs in one pass, accumulate all slugs
-    all_slugs: set[str] = set()
-    daily_users_raw: list[tuple[str, int, dict[str, int], list[dict]]] = []
-    weekly_users_raw: list[tuple[str, Optional[int], dict[str, int], list[dict]]] = []
+    # Compute counts using snapshot diffs (accurate, not limited by recent[] cap)
+    daily_users_processed: list[tuple[str, int, dict[str, int]]] = []
+    weekly_users_processed: list[tuple[str, Optional[int], dict[str, int]]] = []
 
     for username, profile in sorted(profiles.items(), key=lambda x: x[0].lower()):
         if profile is None:
             continue
 
-        # Daily: filter from today's snapshot
+        # Daily: use snapshot diff for accurate count
         snapshot_data = get_snapshot(chat_id, username, tz)
-        cutoff_ts = snapshot_data["timestamp"] if snapshot_data else None
-        daily_subs = filter_today_accepted(profile["recent"], tz, cutoff_ts)
-        for sub in daily_subs:
-            slug = sub.get("titleSlug", "")
-            if slug:
-                all_slugs.add(slug)
-
-        diff_from_subs_daily = {"Easy": 0, "Medium": 0, "Hard": 0}
-        daily_users_raw.append((username, len(daily_subs), diff_from_subs_daily, daily_subs))
-
-        # Weekly: filter from week's snapshot
-        week_snapshot = get_week_snapshot(chat_id, username, tz)
-        if week_snapshot is None:
-            weekly_users_raw.append((username, None, {}, []))
+        if snapshot_data:
+            daily_diff = compute_diff(profile["counts"], snapshot_data["counts"])
+            daily_count = sum(daily_diff.values())
         else:
-            week_subs = filter_week_accepted(profile["recent"], week_snapshot["timestamp"])
-            for sub in week_subs:
-                slug = sub.get("titleSlug", "")
-                if slug:
-                    all_slugs.add(slug)
+            daily_diff = {"Easy": 0, "Medium": 0, "Hard": 0}
+            daily_count = 0
 
-            diff_from_subs_week = {"Easy": 0, "Medium": 0, "Hard": 0}
-            weekly_users_raw.append((username, len(week_subs), diff_from_subs_week, week_subs))
+        daily_users_processed.append((username, daily_count, daily_diff))
 
-    # Single batch fetch for all slugs
-    difficulties = await fetch_question_difficulties(list(all_slugs))
+        # Weekly: use snapshot diff for accurate count
+        week_snapshot = get_week_snapshot(chat_id, username, tz)
+        if week_snapshot:
+            weekly_diff = compute_diff(profile["counts"], week_snapshot["counts"])
+            weekly_count = sum(weekly_diff.values())
+        else:
+            weekly_diff = {"Easy": 0, "Medium": 0, "Hard": 0}
+            weekly_count = None
 
-    # Fill in difficulty breakdowns
-    daily_users_processed = []
-    for username, count, diff_from_subs, subs in daily_users_raw:
-        for sub in subs:
-            slug = sub.get("titleSlug", "")
-            difficulty = difficulties.get(slug, "")
-            if difficulty in diff_from_subs:
-                diff_from_subs[difficulty] += 1
-        daily_users_processed.append((username, count, diff_from_subs))
+        weekly_users_processed.append((username, weekly_count, weekly_diff))
 
-    weekly_users_processed = []
-    for username, count, diff_from_subs, subs in weekly_users_raw:
-        if count is not None:
-            for sub in subs:
-                slug = sub.get("titleSlug", "")
-                difficulty = difficulties.get(slug, "")
-                if difficulty in diff_from_subs:
-                    diff_from_subs[difficulty] += 1
-        weekly_users_processed.append((username, count, diff_from_subs))
-
-    # Sort each section independently
+    # Sort each section independently by count
     daily_users_processed.sort(key=lambda x: (-x[1], x[0].lower()))
     weekly_users_processed.sort(key=lambda x: (-x[1] if x[1] is not None else float('inf'), x[0].lower()))
 
@@ -228,22 +202,14 @@ async def format_weekly(
                 if slug:
                     all_week_slugs.add(slug)
 
-            # Use submissions-based count for consistency with daily and leaderboard
-            count = len(week_subs)
-            diff_from_subs = {"Easy": 0, "Medium": 0, "Hard": 0}
+            # Use snapshot diff for accurate count (not limited by recent[] cap)
+            count = compute_diff_total
+            diff_breakdown = week_diff
 
-            user_rows.append((username, profile, count, diff_from_subs, week_subs, compute_diff_total))
+            user_rows.append((username, profile, count, diff_breakdown, week_subs, compute_diff_total))
 
-    # Batch fetch weekly difficulties
+    # Batch fetch weekly difficulties (for problem titles only)
     week_difficulties = await fetch_question_difficulties(list(all_week_slugs))
-
-    # Fill in difficulty breakdowns
-    for i, (username, profile, count, diff_from_subs, subs, compute_diff_total) in enumerate(user_rows):
-        for sub in subs:
-            slug = sub.get("titleSlug", "")
-            difficulty = week_difficulties.get(slug, "")
-            if difficulty in diff_from_subs:
-                diff_from_subs[difficulty] += 1
 
     # Sort: by count descending, then alphabetically. Users with no snapshot sort to bottom.
     user_rows.sort(key=lambda x: (0 if x[5] is not None else 1, -(x[2] if x[2] is not None else 0), x[0].lower()))

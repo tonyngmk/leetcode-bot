@@ -26,7 +26,7 @@ query getUserProfile($username: String!) {
       }
     }
   }
-  recentSubmissionList(username: $username) {
+  recentSubmissionList(username: $username, limit: 50) {
     title
     titleSlug
     timestamp
