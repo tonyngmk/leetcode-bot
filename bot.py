@@ -7,7 +7,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 
 import storage
 from config import BOT_TOKEN, VALID_INTERVALS
-from formatter import format_summary
+from formatter import format_daily, format_leaderboard, format_weekly
 from leetcode import fetch_all_users, fetch_user_profile, take_snapshot
 
 logging.basicConfig(
@@ -74,7 +74,7 @@ async def _send_summary(context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     tz = _tz(chat_id)
     profiles = await fetch_all_users(users)
-    text = await format_summary(chat_id, profiles, tz)
+    text = await format_leaderboard(chat_id, profiles, tz)
     await context.bot.send_message(
         chat_id=int(chat_id), text=text, parse_mode="MarkdownV2",
         disable_web_page_preview=True,
@@ -133,7 +133,9 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/add\\_user \\<username\\> \\- Track a LeetCode user\n"
         "/remove\\_user \\<username\\> \\- Stop tracking a user\n"
         "/users \\- List tracked users\n"
-        "/summary \\- Show today's progress\n"
+        "/summary \\- Daily \\+ weekly leaderboard\n"
+        "/daily \\- Today's problems per user\n"
+        "/weekly \\- This week's problems per user\n"
         "/interval \\<30m\\|1h\\|2h\\|6h\\|1d\\|off\\> \\- Auto summary interval\n"
         "/help \\- Show this message"
     )
@@ -204,7 +206,37 @@ async def cmd_summary(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     tz = _tz(chat_id)
     profiles = await fetch_all_users(users)
-    text = await format_summary(chat_id, profiles, tz)
+    text = await format_leaderboard(chat_id, profiles, tz)
+    await update.message.reply_text(
+        text, parse_mode="MarkdownV2", disable_web_page_preview=True,
+    )
+
+
+async def cmd_daily(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = _chat_id(update)
+    users = storage.get_users(chat_id)
+    if not users:
+        await update.message.reply_text("No users tracked. Use /add_user <username> to add one.")
+        return
+
+    tz = _tz(chat_id)
+    profiles = await fetch_all_users(users)
+    text = await format_daily(chat_id, profiles, tz)
+    await update.message.reply_text(
+        text, parse_mode="MarkdownV2", disable_web_page_preview=True,
+    )
+
+
+async def cmd_weekly(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = _chat_id(update)
+    users = storage.get_users(chat_id)
+    if not users:
+        await update.message.reply_text("No users tracked. Use /add_user <username> to add one.")
+        return
+
+    tz = _tz(chat_id)
+    profiles = await fetch_all_users(users)
+    text = await format_weekly(chat_id, profiles, tz)
     await update.message.reply_text(
         text, parse_mode="MarkdownV2", disable_web_page_preview=True,
     )
@@ -257,6 +289,8 @@ def main() -> None:
     app.add_handler(CommandHandler("remove_user", cmd_remove_user))
     app.add_handler(CommandHandler("users", cmd_users))
     app.add_handler(CommandHandler("summary", cmd_summary))
+    app.add_handler(CommandHandler("daily", cmd_daily))
+    app.add_handler(CommandHandler("weekly", cmd_weekly))
     app.add_handler(CommandHandler("interval", cmd_interval))
 
     logger.info("Bot starting...")

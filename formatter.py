@@ -1,29 +1,35 @@
+from datetime import datetime
 from typing import Optional
 from zoneinfo import ZoneInfo
 
 from leetcode import (
     DIFFICULTY_EMOJI,
+    compute_diff,
     fetch_question_difficulties,
     filter_today_accepted,
+    filter_week_accepted,
     get_snapshot,
+    get_week_daily_counts,
+    get_week_snapshot,
 )
 
 
-async def format_summary(
+async def format_daily(
     chat_id: str,
     profiles: dict[str, Optional[dict]],
     tz: ZoneInfo,
-    snapshot_label: str = "today",
 ) -> str:
+    """Format detailed daily progress view, sorted by problems solved."""
     if not profiles:
         return "No users are being tracked. Use /add_user <username> to add one."
 
     # Collect all slugs from today's submissions across all users to batch-fetch difficulties
     all_slugs: set[str] = set()
-    user_today_subs: dict[str, list[dict]] = {}
-    user_cutoffs: dict[str, int] = {}
+    user_rows: list[tuple[str, Optional[dict], int, dict[str, int], list[dict], Optional[dict]]] = []
+
     for username, profile in profiles.items():
         if profile is None:
+            user_rows.append((username, None, 0, {}, [], None))
             continue
 
         # Get snapshot to determine cutoff time
@@ -31,28 +37,39 @@ async def format_summary(
         cutoff_ts = snapshot_data["timestamp"] if snapshot_data else None
 
         subs = filter_today_accepted(profile["recent"], tz, cutoff_ts)
-        user_today_subs[username] = subs
-        if cutoff_ts:
-            user_cutoffs[username] = cutoff_ts
 
         for sub in subs:
             slug = sub.get("titleSlug")
             if slug:
                 all_slugs.add(slug)
 
+        # Compute difficulty breakdown
+        diff_from_subs = {"Easy": 0, "Medium": 0, "Hard": 0}
+        solved_today = len(subs)
+        user_rows.append((username, profile, solved_today, diff_from_subs, subs, snapshot_data))
+
     difficulties = await fetch_question_difficulties(list(all_slugs))
 
-    lines = ["*Today's LeetCode Progress*\n"]
+    # Fill in difficulty counts
+    for i, (username, profile, solved_today, diff_from_subs, subs, snapshot_data) in enumerate(user_rows):
+        for sub in subs:
+            slug = sub.get("titleSlug", "")
+            difficulty = difficulties.get(slug, "")
+            if difficulty in diff_from_subs:
+                diff_from_subs[difficulty] += 1
 
-    for username, profile in sorted(profiles.items(), key=lambda x: x[0].lower()):
+    # Sort: by solved_today descending, then alphabetically. Users with no snapshot sort to bottom.
+    user_rows.sort(key=lambda x: (0 if x[5] is not None else 1, -x[2], x[0].lower()))
+
+    lines = ["*Daily Progress*\n"]
+
+    for username, profile, solved_today, diff_from_subs, subs, snapshot_data in user_rows:
         if profile is None:
             lines.append(f"*{_esc(username)}*: _failed to fetch \\(private or invalid\\)_\n")
             continue
 
-        counts = profile["counts"]
-        snapshot_data = get_snapshot(chat_id, username, tz)
-
         if snapshot_data is None:
+            counts = profile["counts"]
             total = sum(counts.values())
             diff_parts = _emoji_counts(counts)
             lines.append(
@@ -62,26 +79,14 @@ async def format_summary(
             lines.append(f"  _No baseline yet \\- tracking starts tomorrow_\n")
             continue
 
-        today_subs = user_today_subs.get(username, [])
-
-        # Derive count and difficulty breakdown from the actual submissions list
-        # to avoid latency in LeetCode's aggregate acSubmissionNum stat
-        diff_from_subs = {"Easy": 0, "Medium": 0, "Hard": 0}
-        for sub in today_subs:
-            slug = sub.get("titleSlug", "")
-            difficulty = difficulties.get(slug, "")
-            if difficulty in diff_from_subs:
-                diff_from_subs[difficulty] += 1
-        solved_today = sum(diff_from_subs.values())
-
-        header = f"*{_esc(username)}*: *{solved_today}* solved {snapshot_label}"
+        header = f"*{_esc(username)}*: *{solved_today}* solved today"
         if solved_today > 0:
             header += f" \\({_emoji_counts(diff_from_subs)}\\)"
 
         lines.append(header)
 
-        if today_subs:
-            for sub in today_subs:
+        if subs:
+            for sub in subs:
                 title = _esc(sub.get("title", "Unknown"))
                 slug = sub.get("titleSlug", "")
                 emoji = DIFFICULTY_EMOJI.get(difficulties.get(slug, ""), "")
@@ -90,7 +95,279 @@ async def format_summary(
 
         lines.append("")
 
+    # Append bar chart
+    chart = _bar_chart_text(user_rows)
+    if chart:
+        lines.append("\n📊 *Chart*")
+        lines.append(f"```\n{chart}\n```")
+
     return "\n".join(lines)
+
+
+async def format_leaderboard(
+    chat_id: str,
+    profiles: dict[str, Optional[dict]],
+    tz: ZoneInfo,
+) -> str:
+    """Format compact dual-ranking leaderboard (daily + weekly) with consistent counting."""
+    if not profiles:
+        return "No users are being tracked. Use /add_user <username> to add one."
+
+    # Collect both daily and weekly subs in one pass, accumulate all slugs
+    all_slugs: set[str] = set()
+    daily_users_raw: list[tuple[str, int, dict[str, int], list[dict]]] = []
+    weekly_users_raw: list[tuple[str, Optional[int], dict[str, int], list[dict]]] = []
+
+    for username, profile in sorted(profiles.items(), key=lambda x: x[0].lower()):
+        if profile is None:
+            continue
+
+        # Daily: filter from today's snapshot
+        snapshot_data = get_snapshot(chat_id, username, tz)
+        cutoff_ts = snapshot_data["timestamp"] if snapshot_data else None
+        daily_subs = filter_today_accepted(profile["recent"], tz, cutoff_ts)
+        for sub in daily_subs:
+            slug = sub.get("titleSlug", "")
+            if slug:
+                all_slugs.add(slug)
+
+        diff_from_subs_daily = {"Easy": 0, "Medium": 0, "Hard": 0}
+        daily_users_raw.append((username, len(daily_subs), diff_from_subs_daily, daily_subs))
+
+        # Weekly: filter from week's snapshot
+        week_snapshot = get_week_snapshot(chat_id, username, tz)
+        if week_snapshot is None:
+            weekly_users_raw.append((username, None, {}, []))
+        else:
+            week_subs = filter_week_accepted(profile["recent"], week_snapshot["timestamp"])
+            for sub in week_subs:
+                slug = sub.get("titleSlug", "")
+                if slug:
+                    all_slugs.add(slug)
+
+            diff_from_subs_week = {"Easy": 0, "Medium": 0, "Hard": 0}
+            weekly_users_raw.append((username, len(week_subs), diff_from_subs_week, week_subs))
+
+    # Single batch fetch for all slugs
+    difficulties = await fetch_question_difficulties(list(all_slugs))
+
+    # Fill in difficulty breakdowns
+    daily_users_processed = []
+    for username, count, diff_from_subs, subs in daily_users_raw:
+        for sub in subs:
+            slug = sub.get("titleSlug", "")
+            difficulty = difficulties.get(slug, "")
+            if difficulty in diff_from_subs:
+                diff_from_subs[difficulty] += 1
+        daily_users_processed.append((username, count, diff_from_subs))
+
+    weekly_users_processed = []
+    for username, count, diff_from_subs, subs in weekly_users_raw:
+        if count is not None:
+            for sub in subs:
+                slug = sub.get("titleSlug", "")
+                difficulty = difficulties.get(slug, "")
+                if difficulty in diff_from_subs:
+                    diff_from_subs[difficulty] += 1
+        weekly_users_processed.append((username, count, diff_from_subs))
+
+    # Sort each section independently
+    daily_users_processed.sort(key=lambda x: (-x[1], x[0].lower()))
+    weekly_users_processed.sort(key=lambda x: (-x[1] if x[1] is not None else float('inf'), x[0].lower()))
+
+    # === BUILD OUTPUT ===
+    lines = ["*Leaderboard*\n", "*Today*"]
+    for i, (username, count, diff_from_subs) in enumerate(daily_users_processed, 1):
+        if count == 0:
+            lines.append(f"{i}\\. {_esc(username)} — *0*")
+        else:
+            emoji_part = f" \\({_emoji_counts(diff_from_subs)}\\)"
+            lines.append(f"{i}\\. {_esc(username)} — *{count}*{emoji_part}")
+
+    lines.append("\n*This Week*")
+    for i, (username, weekly_count, week_diff) in enumerate(weekly_users_processed, 1):
+        if weekly_count is None:
+            lines.append(f"{i}\\. {_esc(username)} — *\\?*")
+        elif weekly_count == 0:
+            lines.append(f"{i}\\. {_esc(username)} — *0*")
+        else:
+            emoji_part = f" \\({_emoji_counts(week_diff)}\\)"
+            lines.append(f"{i}\\. {_esc(username)} — *{weekly_count}*{emoji_part}")
+
+    return "\n".join(lines)
+
+
+async def format_weekly(
+    chat_id: str,
+    profiles: dict[str, Optional[dict]],
+    tz: ZoneInfo,
+) -> str:
+    """Format detailed weekly progress view, sorted by problems solved."""
+    if not profiles:
+        return "No users are being tracked. Use /add_user <username> to add one."
+
+    all_week_slugs: set[str] = set()
+    user_rows: list[tuple[str, Optional[dict], Optional[int], dict[str, int], list[dict], Optional[int]]] = []
+
+    for username, profile in profiles.items():
+        if profile is None:
+            user_rows.append((username, None, None, {}, [], None))
+            continue
+
+        week_snapshot = get_week_snapshot(chat_id, username, tz)
+        if week_snapshot is None:
+            user_rows.append((username, profile, None, {}, [], None))
+        else:
+            week_start_ts = week_snapshot["timestamp"]
+            week_subs = filter_week_accepted(profile["recent"], week_start_ts)
+            week_diff = compute_diff(profile["counts"], week_snapshot["counts"])
+            compute_diff_total = sum(week_diff.values())
+
+            for sub in week_subs:
+                slug = sub.get("titleSlug", "")
+                if slug:
+                    all_week_slugs.add(slug)
+
+            # Use submissions-based count for consistency with daily and leaderboard
+            count = len(week_subs)
+            diff_from_subs = {"Easy": 0, "Medium": 0, "Hard": 0}
+
+            user_rows.append((username, profile, count, diff_from_subs, week_subs, compute_diff_total))
+
+    # Batch fetch weekly difficulties
+    week_difficulties = await fetch_question_difficulties(list(all_week_slugs))
+
+    # Fill in difficulty breakdowns
+    for i, (username, profile, count, diff_from_subs, subs, compute_diff_total) in enumerate(user_rows):
+        for sub in subs:
+            slug = sub.get("titleSlug", "")
+            difficulty = week_difficulties.get(slug, "")
+            if difficulty in diff_from_subs:
+                diff_from_subs[difficulty] += 1
+
+    # Sort: by count descending, then alphabetically. Users with no snapshot sort to bottom.
+    user_rows.sort(key=lambda x: (0 if x[5] is not None else 1, -(x[2] if x[2] is not None else 0), x[0].lower()))
+
+    lines = ["*Weekly Progress*\n"]
+
+    for username, profile, count, diff_from_subs, subs, compute_diff_total in user_rows:
+        if profile is None:
+            lines.append(f"*{_esc(username)}*: _failed to fetch_\n")
+            continue
+
+        if count is None:
+            lines.append(f"*{_esc(username)}*: _No data for this week yet_\n")
+            continue
+
+        # Header with count (submissions-based)
+        emoji_part = ""
+        if count > 0:
+            emoji_part = f" \\({_emoji_counts(diff_from_subs)}\\)"
+        lines.append(f"*{_esc(username)}* — *{count}* this week{emoji_part}")
+
+        # Problem list
+        if subs:
+            for sub in subs:
+                title = _esc(sub.get("title", "Unknown"))
+                slug = sub.get("titleSlug", "")
+                difficulty = week_difficulties.get(slug, "")
+                emoji = DIFFICULTY_EMOJI.get(difficulty, "")
+                prefix = f"{emoji} " if emoji else ""
+                lines.append(f"  {prefix}[{title}](https://leetcode.com/problems/{slug}/)")
+
+            # Overflow note if compute_diff (accurate count) is higher than shown count
+            if compute_diff_total and compute_diff_total > len(subs):
+                overflow = compute_diff_total - len(subs)
+                lines.append(f"  _\+{overflow} more not shown_")
+
+        lines.append("")
+
+    # Append sparkline chart
+    per_day = get_week_daily_counts(chat_id, profiles, tz)
+    days_elapsed = datetime.now(tz).weekday() + 1  # 1=Monday through 7=Sunday
+    chart = _sparkline_text(per_day, days_elapsed)
+    if chart:
+        lines.append("\n📈 *Trend*")
+        lines.append(f"```\n{chart}\n```")
+
+    return "\n".join(lines)
+
+
+# Chart constants
+SPARKS = "▁▂▃▄▅▆▇█"
+DAY_LABELS = ["M", "T", "W", "T", "F", "S", "S"]
+
+
+def _bar_chart_text(user_rows: list, max_width: int = 10) -> str:
+    """Build monospace horizontal bar chart for daily solved counts."""
+    valid = [
+        (u, solved, diff)
+        for (u, profile, solved, diff, subs, snap) in user_rows
+        if profile is not None and snap is not None
+    ]
+
+    if not valid or all(c == 0 for _, c, _ in valid):
+        return ""
+
+    max_count = max(c for _, c, _ in valid)
+    max_name_len = max(len(u) for u, _, _ in valid)
+
+    rows = []
+    for username, count, diff in sorted(valid, key=lambda x: (-x[1], x[0].lower())):
+        filled = round(count / max_count * max_width) if max_count else 0
+        bar = "█" * filled + "░" * (max_width - filled)
+        parts = [
+            f"{DIFFICULTY_EMOJI[d]}{n}"
+            for d in ("Easy", "Medium", "Hard")
+            if (n := diff.get(d, 0))
+        ]
+        suffix = "  " + " ".join(parts) if parts else ""
+        rows.append(f"{username.ljust(max_name_len)}  {bar}  {count}{suffix}")
+
+    return "\n".join(rows)
+
+
+def _sparkline_text(per_day_counts: dict[str, list], days_elapsed: int) -> str:
+    """Build monospace sparkline chart for weekly trends."""
+    if not per_day_counts:
+        return ""
+
+    all_values = [
+        c
+        for counts in per_day_counts.values()
+        for c in counts
+        if c is not None and c > 0
+    ]
+    max_val = max(all_values) if all_values else 0
+    max_name_len = max(len(u) for u in per_day_counts) if per_day_counts else 0
+
+    labels = DAY_LABELS[:days_elapsed] + ["·"] * (7 - days_elapsed)
+    header = " " * (max_name_len + 2) + "  ".join(labels)
+
+    rows = [header]
+    for username, counts in sorted(
+        per_day_counts.items(),
+        key=lambda x: (-(sum(c for c in x[1] if c) or 0), x[0].lower()),
+    ):
+        chars = []
+        for i in range(7):
+            if i >= days_elapsed:
+                chars.append("·")  # future days
+            elif i >= len(counts) or counts[i] is None:
+                chars.append("?")  # missing snapshot
+            elif counts[i] == 0:
+                chars.append("░")
+            else:
+                idx = (
+                    min(7, max(0, round(counts[i] / max_val * 7.5) - 1))
+                    if max_val
+                    else 0
+                )
+                chars.append(SPARKS[idx])
+
+        rows.append(f"{username.ljust(max_name_len)}  {'  '.join(chars)}")
+
+    return "\n".join(rows)
 
 
 def _emoji_counts(counts: dict[str, int]) -> str:
