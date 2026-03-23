@@ -43,13 +43,10 @@ async def format_daily(
             if slug:
                 all_slugs.add(slug)
 
-        # Use snapshot diff for accurate count and difficulty breakdown
-        if snapshot_data:
-            diff_breakdown = compute_diff(profile["counts"], snapshot_data["counts"])
-            solved_today = sum(diff_breakdown.values())
-        else:
-            diff_breakdown = {"Easy": 0, "Medium": 0, "Hard": 0}
-            solved_today = 0
+        # Count from submissions (what's visible in recent[])
+        solved_today = len(subs)
+        # Store snapshot diff for emoji display (computed in render loop)
+        diff_breakdown = None  # Will compute from snapshot in render
 
         user_rows.append((username, profile, solved_today, diff_breakdown, subs, snapshot_data))
 
@@ -76,9 +73,17 @@ async def format_daily(
             lines.append(f"  _No baseline yet \\- tracking starts tomorrow_\n")
             continue
 
+        # Build difficulty breakdown from submissions themselves
+        subs_diff = {"Easy": 0, "Medium": 0, "Hard": 0}
+        for sub in subs:
+            slug = sub.get("titleSlug", "")
+            difficulty = difficulties.get(slug, "")
+            if difficulty in subs_diff:
+                subs_diff[difficulty] += 1
+
         header = f"*{_esc(username)}*: *{solved_today}* solved today"
         if solved_today > 0:
-            header += f" \\({_emoji_counts(diff_from_subs)}\\)"
+            header += f" \\({_emoji_counts(subs_diff)}\\)"
 
         lines.append(header)
 
@@ -90,10 +95,13 @@ async def format_daily(
                 prefix = f"{emoji} " if emoji else ""
                 lines.append(f"  {prefix}[{title}](https://leetcode.com/problems/{slug}/)")
 
-            # Overflow note if snapshot diff > shown list
-            if solved_today > len(subs):
-                overflow = solved_today - len(subs)
-                lines.append(f"  _\+{overflow} more not shown_")
+            # Overflow note if snapshot diff shows more solved than captured in recent[]
+            if snapshot_data:
+                snapshot_diff = compute_diff(profile["counts"], snapshot_data["counts"])
+                snapshot_diff_total = sum(snapshot_diff.values())
+                if snapshot_diff_total > len(subs):
+                    overflow = snapshot_diff_total - len(subs)
+                    lines.append(f"  _\+{overflow} more not shown_")
 
         lines.append("")
 
@@ -195,18 +203,19 @@ async def format_weekly(
             week_start_ts = week_snapshot["timestamp"]
             week_subs = filter_week_accepted(profile["recent"], week_start_ts)
             week_diff = compute_diff(profile["counts"], week_snapshot["counts"])
-            compute_diff_total = sum(week_diff.values())
+            week_diff_total = sum(week_diff.values())
 
             for sub in week_subs:
                 slug = sub.get("titleSlug", "")
                 if slug:
                     all_week_slugs.add(slug)
 
-            # Use snapshot diff for accurate count (not limited by recent[] cap)
-            count = compute_diff_total
+            # Use submissions-based count (what's visible in recent[])
+            count = len(week_subs)
+            # Store the snapshot diff for emoji display
             diff_breakdown = week_diff
 
-            user_rows.append((username, profile, count, diff_breakdown, week_subs, compute_diff_total))
+            user_rows.append((username, profile, count, diff_breakdown, week_subs, week_diff_total))
 
     # Batch fetch weekly difficulties (for problem titles only)
     week_difficulties = await fetch_question_difficulties(list(all_week_slugs))
@@ -225,10 +234,17 @@ async def format_weekly(
             lines.append(f"*{_esc(username)}*: _No data for this week yet_\n")
             continue
 
-        # Header with count (submissions-based)
+        # Build difficulty breakdown from submissions themselves
+        subs_diff = {"Easy": 0, "Medium": 0, "Hard": 0}
+        for sub in subs:
+            slug = sub.get("titleSlug", "")
+            difficulty = week_difficulties.get(slug, "")
+            if difficulty in subs_diff:
+                subs_diff[difficulty] += 1
+
         emoji_part = ""
         if count > 0:
-            emoji_part = f" \\({_emoji_counts(diff_from_subs)}\\)"
+            emoji_part = f" \\({_emoji_counts(subs_diff)}\\)"
         lines.append(f"*{_esc(username)}* — *{count}* this week{emoji_part}")
 
         # Problem list
@@ -241,7 +257,7 @@ async def format_weekly(
                 prefix = f"{emoji} " if emoji else ""
                 lines.append(f"  {prefix}[{title}](https://leetcode.com/problems/{slug}/)")
 
-            # Overflow note if compute_diff (accurate count) is higher than shown count
+            # Overflow note if snapshot diff shows more solved than captured in recent[]
             if compute_diff_total and compute_diff_total > len(subs):
                 overflow = compute_diff_total - len(subs)
                 lines.append(f"  _\+{overflow} more not shown_")
