@@ -123,9 +123,12 @@ async def format_leaderboard(
     if not profiles:
         return "No users are being tracked. Use /add_user <username> to add one."
 
+    # Collect all slugs for batch fetching difficulties
+    all_slugs: set[str] = set()
+
     # Compute counts using submissions-based approach (consistent with /daily and /weekly)
-    daily_users_processed: list[tuple[str, int, dict[str, int]]] = []
-    weekly_users_processed: list[tuple[str, Optional[int], dict[str, int]]] = []
+    daily_data: list[tuple[str, list[dict]]] = []  # (username, subs)
+    weekly_data: list[tuple[str, list[dict]]] = []  # (username, subs)
 
     for username, profile in sorted(profiles.items(), key=lambda x: x[0].lower()):
         if profile is None:
@@ -135,23 +138,53 @@ async def format_leaderboard(
         snapshot_data = get_snapshot(chat_id, username, tz)
         cutoff_ts = snapshot_data["timestamp"] if snapshot_data else None
         daily_subs = filter_today_accepted(profile["recent"], tz, cutoff_ts)
-        daily_count = len(daily_subs)
+        daily_data.append((username, daily_subs))
 
-        # Compute emoji breakdown from submissions
-        daily_diff = {"Easy": 0, "Medium": 0, "Hard": 0}
-        daily_users_processed.append((username, daily_count, daily_diff))
+        for sub in daily_subs:
+            slug = sub.get("titleSlug", "")
+            if slug:
+                all_slugs.add(slug)
 
         # Weekly: count from week's submissions
         week_snapshot = get_week_snapshot(chat_id, username, tz)
         if week_snapshot:
             week_start_ts = week_snapshot["timestamp"]
             weekly_subs = filter_week_accepted(profile["recent"], week_start_ts)
-            weekly_count = len(weekly_subs)
-            weekly_diff = {"Easy": 0, "Medium": 0, "Hard": 0}
         else:
-            weekly_count = None
-            weekly_diff = {"Easy": 0, "Medium": 0, "Hard": 0}
+            weekly_subs = []
 
+        weekly_data.append((username, weekly_subs))
+
+        for sub in weekly_subs:
+            slug = sub.get("titleSlug", "")
+            if slug:
+                all_slugs.add(slug)
+
+    # Batch fetch difficulties
+    difficulties = await fetch_question_difficulties(list(all_slugs))
+
+    # Build processed lists with difficulty breakdowns
+    daily_users_processed: list[tuple[str, int, dict[str, int]]] = []
+    weekly_users_processed: list[tuple[str, Optional[int], dict[str, int]]] = []
+
+    for username, daily_subs in daily_data:
+        daily_count = len(daily_subs)
+        daily_diff = {"Easy": 0, "Medium": 0, "Hard": 0}
+        for sub in daily_subs:
+            slug = sub.get("titleSlug", "")
+            difficulty = difficulties.get(slug, "")
+            if difficulty in daily_diff:
+                daily_diff[difficulty] += 1
+        daily_users_processed.append((username, daily_count, daily_diff))
+
+    for username, weekly_subs in weekly_data:
+        weekly_count = len(weekly_subs) if weekly_subs else None
+        weekly_diff = {"Easy": 0, "Medium": 0, "Hard": 0}
+        for sub in weekly_subs:
+            slug = sub.get("titleSlug", "")
+            difficulty = difficulties.get(slug, "")
+            if difficulty in weekly_diff:
+                weekly_diff[difficulty] += 1
         weekly_users_processed.append((username, weekly_count, weekly_diff))
 
     # Sort each section independently by count
