@@ -119,11 +119,11 @@ async def format_leaderboard(
     profiles: dict[str, Optional[dict]],
     tz: ZoneInfo,
 ) -> str:
-    """Format compact dual-ranking leaderboard (daily + weekly) with snapshot-diff counts."""
+    """Format compact dual-ranking leaderboard (daily + weekly) with submissions-based counts."""
     if not profiles:
         return "No users are being tracked. Use /add_user <username> to add one."
 
-    # Compute counts using snapshot diffs (accurate, not limited by recent[] cap)
+    # Compute counts using submissions-based approach (consistent with /daily and /weekly)
     daily_users_processed: list[tuple[str, int, dict[str, int]]] = []
     weekly_users_processed: list[tuple[str, Optional[int], dict[str, int]]] = []
 
@@ -131,25 +131,26 @@ async def format_leaderboard(
         if profile is None:
             continue
 
-        # Daily: use snapshot diff for accurate count
+        # Daily: count from today's submissions
         snapshot_data = get_snapshot(chat_id, username, tz)
-        if snapshot_data:
-            daily_diff = compute_diff(profile["counts"], snapshot_data["counts"])
-            daily_count = sum(daily_diff.values())
-        else:
-            daily_diff = {"Easy": 0, "Medium": 0, "Hard": 0}
-            daily_count = 0
+        cutoff_ts = snapshot_data["timestamp"] if snapshot_data else None
+        daily_subs = filter_today_accepted(profile["recent"], tz, cutoff_ts)
+        daily_count = len(daily_subs)
 
+        # Compute emoji breakdown from submissions
+        daily_diff = {"Easy": 0, "Medium": 0, "Hard": 0}
         daily_users_processed.append((username, daily_count, daily_diff))
 
-        # Weekly: use snapshot diff for accurate count
+        # Weekly: count from week's submissions
         week_snapshot = get_week_snapshot(chat_id, username, tz)
         if week_snapshot:
-            weekly_diff = compute_diff(profile["counts"], week_snapshot["counts"])
-            weekly_count = sum(weekly_diff.values())
-        else:
+            week_start_ts = week_snapshot["timestamp"]
+            weekly_subs = filter_week_accepted(profile["recent"], week_start_ts)
+            weekly_count = len(weekly_subs)
             weekly_diff = {"Easy": 0, "Medium": 0, "Hard": 0}
+        else:
             weekly_count = None
+            weekly_diff = {"Easy": 0, "Medium": 0, "Hard": 0}
 
         weekly_users_processed.append((username, weekly_count, weekly_diff))
 
