@@ -4,7 +4,6 @@ BOT_TOKEN = os.environ.get("LEETCODE_BOT_TOKEN", "")
 LEETCODE_GRAPHQL_URL = "https://leetcode.com/graphql"
 STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "state.json")
 DEFAULT_TIMEZONE = "Asia/Singapore"
-FETCH_DELAY_SECONDS = 1.0
 
 VALID_INTERVALS = {
     "30m": 30 * 60,

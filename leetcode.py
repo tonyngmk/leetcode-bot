@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 import httpx
 
 import storage
-from config import FETCH_DELAY_SECONDS, LEETCODE_GRAPHQL_URL, USER_PROFILE_QUERY
+from config import LEETCODE_GRAPHQL_URL, USER_PROFILE_QUERY
 
 DIFFICULTY_EMOJI = {"Easy": "\U0001f7e2", "Medium": "\U0001f7e0", "Hard": "\U0001f534"}
 
@@ -224,10 +224,8 @@ def get_week_daily_counts(
 
 
 async def fetch_all_users(usernames: list[str]) -> dict[str, Optional[dict]]:
-    """Fetch profiles for multiple users with rate-limiting delay."""
-    results = {}
-    for i, username in enumerate(usernames):
-        if i > 0:
-            await asyncio.sleep(FETCH_DELAY_SECONDS)
-        results[username] = await fetch_user_profile(username)
-    return results
+    """Fetch profiles for multiple users concurrently."""
+    if not usernames:
+        return {}
+    profiles = await asyncio.gather(*(fetch_user_profile(u) for u in usernames))
+    return dict(zip(usernames, profiles))
