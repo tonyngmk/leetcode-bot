@@ -262,6 +262,7 @@ async def fetch_problems(
     difficulty: Optional[str] = None,
     tags: Optional[list[str]] = None,
     limit: int = 20,
+    skip: int = 0,
 ) -> Optional[dict]:
     """Fetch problem list with optional difficulty/tag filters.
 
@@ -279,7 +280,7 @@ async def fetch_problems(
     if tags:
         filters["tags"] = tags
 
-    variables = {"categorySlug": "", "skip": 0, "limit": limit, "filters": filters}
+    variables = {"categorySlug": "", "skip": skip, "limit": limit, "filters": filters}
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.post(

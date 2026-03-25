@@ -1,9 +1,10 @@
 import logging
 from datetime import datetime, time
+from typing import Optional
 from zoneinfo import ZoneInfo
 
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes
 
 import storage
 from config import BOT_TOKEN, VALID_INTERVALS
@@ -280,6 +281,51 @@ async def cmd_interval(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await update.message.reply_text(f"Automatic summary set to every {interval_key}.")
 
 
+# --- Pagination Helpers for /problems ---
+
+PAGE_SIZE = 20
+
+
+def _encode_problems_callback(page: int, difficulty: Optional[str], tags: list[str]) -> str:
+    """Encode state into ≤64-byte callback string: `p:{page}:{diff}:{tags}`."""
+    diff_map = {"EASY": "E", "MEDIUM": "M", "HARD": "H"}
+    diff_char = diff_map.get(difficulty or "", "")
+    tags_str = ",".join(tags)
+    payload = f"p:{page}:{diff_char}:{tags_str}"
+    # Guard: truncate tags to stay within Telegram's 64-byte limit
+    while len(payload.encode()) > 64 and tags_str:
+        tags_str = tags_str.rsplit(",", 1)[0]
+        payload = f"p:{page}:{diff_char}:{tags_str}"
+    return payload
+
+
+def _decode_problems_callback(data: str) -> tuple:  # (int, Optional[str], list[str])
+    """Parse callback string back to (page, difficulty, tags)."""
+    parts = data.split(":", 3)
+    page = int(parts[1])
+    diff_map = {"E": "EASY", "M": "MEDIUM", "H": "HARD"}
+    difficulty = diff_map.get(parts[2]) or None
+    tags = [t for t in parts[3].split(",") if t] if len(parts) > 3 and parts[3] else []
+    return page, difficulty, tags
+
+
+def _build_problems_keyboard(
+    page: int, total: int, page_size: int,
+    difficulty: Optional[str], tags: list[str],
+) -> Optional[InlineKeyboardMarkup]:
+    """Build Prev/Next inline keyboard, or return None if no buttons are needed."""
+    has_prev = page > 0
+    has_next = (page + 1) * page_size < total
+    if not has_prev and not has_next:
+        return None
+    buttons = []
+    if has_prev:
+        buttons.append(InlineKeyboardButton("⬅ Prev", callback_data=_encode_problems_callback(page - 1, difficulty, tags)))
+    if has_next:
+        buttons.append(InlineKeyboardButton("Next ➡", callback_data=_encode_problems_callback(page + 1, difficulty, tags)))
+    return InlineKeyboardMarkup([buttons])
+
+
 async def cmd_problems(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     args = [a.lower() for a in (context.args or [])]
     difficulty = None
@@ -290,15 +336,44 @@ async def cmd_problems(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         else:
             tags.append(arg)
 
-    result = await fetch_problems(difficulty=difficulty, tags=tags or None)
+    result = await fetch_problems(difficulty=difficulty, tags=tags or None, skip=0, limit=PAGE_SIZE)
     if result is None:
         await update.message.reply_text("Failed to fetch problems.")
         return
 
+    total = result.get("total", 0)
     filters_desc = " · ".join(filter(None, ([difficulty.capitalize()] if difficulty else []) + tags))
-    filters_desc_escaped = _esc(filters_desc)
-    text = format_problems(result, filters_desc_escaped)
-    await update.message.reply_text(text, parse_mode="MarkdownV2", disable_web_page_preview=True)
+    text = format_problems(result, _esc(filters_desc), page=0, page_size=PAGE_SIZE)
+    keyboard = _build_problems_keyboard(0, total, PAGE_SIZE, difficulty, tags)
+    await update.message.reply_text(
+        text, parse_mode="MarkdownV2", disable_web_page_preview=True, reply_markup=keyboard,
+    )
+
+
+async def cmd_problems_page(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle Prev/Next button presses for /problems pagination."""
+    query = update.callback_query
+    await query.answer()
+
+    page, difficulty, tags = _decode_problems_callback(query.data)
+    result = await fetch_problems(
+        difficulty=difficulty, tags=tags or None,
+        skip=page * PAGE_SIZE, limit=PAGE_SIZE,
+    )
+    if result is None:
+        await query.answer("Failed to fetch problems.", show_alert=True)
+        return
+
+    total = result.get("total", 0)
+    filters_desc = " · ".join(filter(None, ([difficulty.capitalize()] if difficulty else []) + tags))
+    text = format_problems(result, _esc(filters_desc), page=page, page_size=PAGE_SIZE)
+    keyboard = _build_problems_keyboard(page, total, PAGE_SIZE, difficulty, tags)
+    try:
+        await query.edit_message_text(
+            text, parse_mode="MarkdownV2", disable_web_page_preview=True, reply_markup=keyboard,
+        )
+    except Exception:
+        pass  # Ignore "Message is not modified" on rapid double-taps
 
 
 async def cmd_problem(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -359,6 +434,7 @@ def main() -> None:
     app.add_handler(CommandHandler("weekly", cmd_weekly))
     app.add_handler(CommandHandler("interval", cmd_interval))
     app.add_handler(CommandHandler("problems", cmd_problems))
+    app.add_handler(CallbackQueryHandler(cmd_problems_page, pattern=r"^p:"))
     app.add_handler(CommandHandler("problem", cmd_problem))
     app.add_handler(CommandHandler("challenge", cmd_challenge))
 

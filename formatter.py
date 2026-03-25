@@ -409,7 +409,7 @@ def _esc(text: str) -> str:
     return "".join(out)
 
 
-def format_problems(result: dict, filters_desc: str) -> str:
+def format_problems(result: dict, filters_desc: str, page: int = 0, page_size: int = 20) -> str:
     """Format problem list response."""
     if not result:
         return "Failed to fetch problems."
@@ -441,7 +441,9 @@ def format_problems(result: dict, filters_desc: str) -> str:
         lines.append(line)
 
     lines.append("")
-    lines.append(f"_Showing {len(questions)} of {total}\\. Use /problem \\<slug\\> for details\\._")
+    start = page * page_size + 1
+    end = page * page_size + len(questions)
+    lines.append(f"_Showing {start}–{end} of {total}\\. Use /problem \\<slug\\> for details\\._")
 
     return "\n".join(lines)
 
