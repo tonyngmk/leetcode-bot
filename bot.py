@@ -1,4 +1,5 @@
 import logging
+import shlex
 from datetime import datetime, time
 from typing import Optional
 from zoneinfo import ZoneInfo
@@ -34,6 +35,9 @@ logger = logging.getLogger(__name__)
 
 JOB_PREFIX = "summary_"
 MIDNIGHT_JOB_PREFIX = "midnight_"
+
+# Store bot username for generating deep links
+_bot_username = None
 
 
 # --- Helpers ---
@@ -140,6 +144,18 @@ def _schedule_midnight_job(app_or_queue, chat_id: str) -> None:
 # --- Command Handlers ---
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # Check for problem_ payload from deep link
+    if context.args and context.args[0].startswith("problem_"):
+        slug = context.args[0][8:]  # Remove "problem_" prefix
+        question = await fetch_problem(slug)
+        if question is None:
+            await update.message.reply_text(f"Problem '{slug}' not found.")
+            return
+        text = format_problem_detail(question)
+        await update.message.reply_text(text, parse_mode="MarkdownV2", disable_web_page_preview=True)
+        return
+
+    # Normal /start → show help
     await cmd_help(update, context)
 
 
@@ -155,7 +171,9 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/weekly \\- This week's problems per user\n"
         "/interval \\<30m\\|1h\\|2h\\|6h\\|1d\\|off\\> \\- Auto summary interval\n\n"
         "*Browsing:*\n"
-        "/problems \\[difficulty\\] \\[tags\\] \\- Browse problems \\(e\\.g\\. /problems easy array\\)\n"
+        "/problems \\[difficulty\\] \\[tags\\] \\- Browse problems\n"
+        "  Examples: /problems  /problems easy  /problems easy array\n"
+        "  Multi\\-word tags: /problems \"dynamic programming\" easy\n"
         "/problem \\<slug\\> \\- Problem details \\(e\\.g\\. /problem two\\-sum\\)\n"
         "/challenge \\- Today's daily challenge\n\n"
         "/help \\- Show this message"
@@ -327,14 +345,28 @@ def _build_problems_keyboard(
 
 
 async def cmd_problems(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    args = [a.lower() for a in (context.args or [])]
+    # Parse raw message text with shlex to support quoted multi-word tags
+    text = update.message.text
+    parts = text.split(None, 1)  # Split at first space only
+    if len(parts) < 2:
+        args = []
+    else:
+        try:
+            args = shlex.split(parts[1])  # Preserves quoted strings
+        except ValueError:
+            await update.message.reply_text("Invalid command format (mismatched quotes)")
+            return
+
+    args = [a.lower() for a in args]
     difficulty = None
     tags = []
     for arg in args:
         if arg in ("easy", "medium", "hard"):
             difficulty = arg.upper()
         else:
-            tags.append(arg)
+            # Convert spaces to hyphens to match LeetCode tag slugs
+            # e.g., "dynamic programming" → "dynamic-programming"
+            tags.append(arg.replace(" ", "-"))
 
     result = await fetch_problems(difficulty=difficulty, tags=tags or None, skip=0, limit=PAGE_SIZE)
     if result is None:
@@ -343,7 +375,7 @@ async def cmd_problems(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     total = result.get("total", 0)
     filters_desc = " · ".join(filter(None, ([difficulty.capitalize()] if difficulty else []) + tags))
-    text = format_problems(result, _esc(filters_desc), page=0, page_size=PAGE_SIZE)
+    text = format_problems(result, _esc(filters_desc), page=0, page_size=PAGE_SIZE, bot_username=_bot_username)
     keyboard = _build_problems_keyboard(0, total, PAGE_SIZE, difficulty, tags)
     await update.message.reply_text(
         text, parse_mode="MarkdownV2", disable_web_page_preview=True, reply_markup=keyboard,
@@ -366,7 +398,7 @@ async def cmd_problems_page(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     total = result.get("total", 0)
     filters_desc = " · ".join(filter(None, ([difficulty.capitalize()] if difficulty else []) + tags))
-    text = format_problems(result, _esc(filters_desc), page=page, page_size=PAGE_SIZE)
+    text = format_problems(result, _esc(filters_desc), page=page, page_size=PAGE_SIZE, bot_username=_bot_username)
     keyboard = _build_problems_keyboard(page, total, PAGE_SIZE, difficulty, tags)
     try:
         await query.edit_message_text(
@@ -404,7 +436,10 @@ async def cmd_challenge(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 # --- Startup ---
 
 async def post_init(app: Application) -> None:
-    """Restore scheduled jobs and take initial snapshots on startup."""
+    """Restore scheduled jobs, take initial snapshots, and store bot username on startup."""
+    global _bot_username
+    _bot_username = app.bot.username
+
     all_chats = storage.get_all_chats()
     for chat_id, chat_data in all_chats.items():
         users = chat_data.get("users", [])

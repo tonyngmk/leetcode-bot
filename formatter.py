@@ -6,6 +6,7 @@ from leetcode import (
     DIFFICULTY_EMOJI,
     _strip_html,
     compute_diff,
+    extract_constraints,
     fetch_question_difficulties,
     filter_today_accepted,
     filter_week_accepted,
@@ -409,7 +410,7 @@ def _esc(text: str) -> str:
     return "".join(out)
 
 
-def format_problems(result: dict, filters_desc: str, page: int = 0, page_size: int = 20) -> str:
+def format_problems(result: dict, filters_desc: str, page: int = 0, page_size: int = 20, bot_username: Optional[str] = None) -> str:
     """Format problem list response."""
     if not result:
         return "Failed to fetch problems."
@@ -435,7 +436,14 @@ def format_problems(result: dict, filters_desc: str, page: int = 0, page_size: i
         tags_str = " ".join(f"\\#{_esc(t['name'])}" for t in tags[:3])  # Limit to 3 tags
 
         ac_rate_str = _esc(f"{ac_rate:.1f}%") if ac_rate else "?%"
-        line = f"{emoji} *{frontend_id}\\. [{title}](https://leetcode.com/problems/{slug}/) `{slug}` · {ac_rate_str}"
+
+        # Use deep link to bot's /problem command if bot username available
+        if bot_username:
+            problem_link = f"https://t.me/{bot_username}?start=problem_{slug}"
+        else:
+            problem_link = f"https://leetcode.com/problems/{slug}/"
+
+        line = f"{emoji} *{frontend_id}\\. [{title}]({problem_link}) `{slug}` · {ac_rate_str}"
         if tags_str:
             line += f" · {tags_str}"
         lines.append(line)
@@ -449,7 +457,7 @@ def format_problems(result: dict, filters_desc: str, page: int = 0, page_size: i
 
 
 def format_problem_detail(question: dict) -> str:
-    """Format full problem detail."""
+    """Format full problem detail with improved styling."""
     if not question:
         return "Problem not found."
 
@@ -468,34 +476,50 @@ def format_problem_detail(question: dict) -> str:
 
     lines = [f"{emoji} *{frontend_id}\\. {title}*"]
 
+    # Tags
     if tags:
         tags_str = " · ".join(_esc(t["name"]) for t in tags)
-        lines.append(f"\n*Tags:* {tags_str}")
+        lines.append(f"*Tags:* {tags_str}")
 
+    # Engagement metrics
     lines.append(f"👍 {likes}  👎 {dislikes}")
 
-    # Content: strip HTML and truncate
+    # Description: strip HTML, don't escape (preserves backticks from _strip_html)
     clean_content = _strip_html(content)
     if clean_content:
-        if len(clean_content) > 800:
-            clean_content = clean_content[:800] + "…"
-        lines.append(f"\n{_esc(clean_content)}")
+        # Remove excessive line breaks and truncate if needed
+        clean_content = " ".join(clean_content.split())  # Normalize whitespace
+        if len(clean_content) > 600:
+            clean_content = clean_content[:600] + "…"
+        lines.append(f"\n{clean_content}")
 
-    # Examples
+    # Constraints: extract from HTML and format as bullet points
+    constraints = extract_constraints(content)
+    if constraints:
+        lines.append("\n*Constraints:*")
+        for constraint in constraints[:5]:
+            lines.append(f"• {_esc(constraint)}")
+
+    # Examples: as blockquote (> prefix each line)
     if examples:
-        examples_clean = _strip_html(examples)[:500]
+        examples_clean = _strip_html(examples)[:400]
         if examples_clean:
-            # No escaping needed inside code blocks in MarkdownV2
-            lines.append(f"\n*Example:*\n```\n{examples_clean}\n```")
+            lines.append("\n*Example:*")
+            # Prefix each line with > for blockquote format
+            quoted = "\n".join(f"> {line}" for line in examples_clean.split("\n"))
+            lines.append(quoted)
 
-    # Hints
+    # Hints: as spoiler text (||text||)
     if hints and len(hints) > 0:
-        hints_str = "\n".join(f"• {_esc(h)}" for h in hints[:3])
-        lines.append(f"\n*Hints:*\n{hints_str}")
+        lines.append("\n*Hints:*")
+        for hint in hints[:3]:
+            lines.append(f"||{_esc(hint)}||")
 
+    # Premium badge
     if is_paid:
         lines.append("\n⚠️ _Premium only_")
 
+    # Link to LeetCode
     lines.append(f"\n[Open on LeetCode](https://leetcode.com/problems/{slug}/)")
 
     return "\n".join(lines)

@@ -243,19 +243,35 @@ async def fetch_all_users(usernames: list[str]) -> dict[str, Optional[dict]]:
 
 
 def _strip_html(text: str) -> str:
-    """Strip HTML tags and unescape HTML entities, converting <code> to backticks."""
+    """Strip HTML tags and unescape HTML entities, preserving code block formatting."""
     text = text or ""
     # First unescape to handle &lt; &gt; etc.
     text = html.unescape(text)
-    # Replace code blocks: <pre><code>...content...</code></pre>
+    # Replace code blocks: preserve backticks for MarkdownV2
+    # <pre><code>...content...</code></pre> → ```...content...```
     text = re.sub(r'<pre><code>(.*?)</code></pre>', r'```\1```', text, flags=re.DOTALL)
-    # Replace inline code: <code>...content...</code>
+    # Replace inline code: preserve backticks
+    # <code>...content...</code> → `...content...`
     text = re.sub(r'<code>(.*?)</code>', r'`\1`', text)
-    # Remove all other HTML tags
+    # Remove other HTML tags (paragraphs, lists, divs, etc.)
     text = re.sub(r"<[^>]+>", "", text)
     # Final unescape in case there are any remaining entities
     text = html.unescape(text).strip()
     return text
+
+
+def extract_constraints(content: str) -> list[str]:
+    """Extract constraint list items from HTML content."""
+    constraints = []
+    # Find <li> list items (typically within <ul> or <ol>)
+    pattern = r'<li>(.*?)</li>'
+    for match in re.finditer(pattern, content, re.DOTALL):
+        constraint_html = match.group(1)
+        # Strip HTML from constraint text
+        constraint = _strip_html(constraint_html)
+        if constraint:
+            constraints.append(constraint)
+    return constraints
 
 
 async def fetch_problems(
