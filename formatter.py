@@ -484,13 +484,23 @@ def format_problems(result: dict, filters_desc: str, page: int = 0, page_size: i
     return "\n".join(lines)
 
 
+def _html_escape(text: str) -> str:
+    """Escape HTML special characters."""
+    text = text or ""
+    text = text.replace("&", "&amp;")
+    text = text.replace("<", "&lt;")
+    text = text.replace(">", "&gt;")
+    text = text.replace('"', "&quot;")
+    return text
+
+
 def format_problem_detail(question: dict) -> str:
-    """Format full problem detail with improved styling."""
+    """Format full problem detail for HTML mode (avoids MarkdownV2 parsing issues)."""
     if not question:
         return "Problem not found."
 
     frontend_id = question.get("questionFrontendId", "?")
-    title = _esc(question.get("title", "Unknown"))
+    title = _html_escape(question.get("title", "Unknown"))
     difficulty = question.get("difficulty", "")
     emoji = DIFFICULTY_EMOJI.get(difficulty, "")
     slug = question.get("titleSlug", "")
@@ -499,61 +509,62 @@ def format_problem_detail(question: dict) -> str:
     dislikes = question.get("dislikes", 0)
     tags = question.get("topicTags", [])
     hints = question.get("hints", [])
-    # Note: examples are extracted from content HTML <pre> blocks, not from exampleTestcases
     is_paid = question.get("isPaidOnly", False)
 
-    lines = [f"{emoji} *{frontend_id}\\. {title}*"]
+    lines = [f"{emoji} <b>{frontend_id}. {title}</b>"]
 
     # Tags
     if tags:
-        tags_str = " · ".join(_esc(t["name"]) for t in tags)
-        lines.append(f"*Tags:* {tags_str}")
+        tags_str = " · ".join(_html_escape(t["name"]) for t in tags)
+        lines.append(f"<b>Tags:</b> {tags_str}")
 
     # Engagement metrics
     lines.append(f"👍 {likes}  👎 {dislikes}")
 
-    # Description: extract only description part (before examples/constraints), then format
+    # Description: extract only description part, then format
     description_html = extract_description(content)
     clean_content = _strip_html(description_html)
     if clean_content:
         # Remove excessive line breaks and truncate if needed
-        clean_content = " ".join(clean_content.split())  # Normalize whitespace
+        clean_content = " ".join(clean_content.split())
         if len(clean_content) > 600:
             clean_content = clean_content[:600] + "…"
-        # Escape content but preserve backticks (code formatting from _strip_html)
-        escaped_content = _esc_preserve_code(clean_content)
+        # In HTML mode, just escape and convert backticks to <code>
+        escaped_content = _html_escape(clean_content)
+        # Convert backticks to HTML code tags
+        escaped_content = escaped_content.replace("`", "<code>").replace("`", "</code>")
         lines.append(f"\n{escaped_content}")
 
     # Constraints: extract from HTML and format as bullet points
     constraints = extract_constraints(content)
     if constraints:
-        lines.append("\n*Constraints:*")
+        lines.append("\n<b>Constraints:</b>")
         for constraint in constraints[:5]:
-            lines.append(f"• {_esc(constraint)}")
+            escaped_constraint = _html_escape(constraint)
+            lines.append(f"• {escaped_constraint}")
 
-    # Examples: extract from <pre> blocks in content HTML (not from exampleTestcases)
-    # Each example is properly formatted with Input: / Output: / Explanation: labels
+    # Examples: extract from <pre> blocks in content HTML
     examples = extract_examples(content)
     if examples:
         for i, example in enumerate(examples[:3], 1):
-            lines.append(f"\n*Example {i}:*")
-            # Escape content for MarkdownV2 (= is reserved and must be escaped)
-            escaped_example = _esc_preserve_code(example)
-            # Use code block to preserve formatting and monospace style
-            lines.append(f"```\n{escaped_example}\n```")
+            lines.append(f"\n<b>Example {i}:</b>")
+            # In HTML mode, use <pre> for preformatted code (no escaping of = etc)
+            escaped_example = _html_escape(example)
+            lines.append(f"<pre>{escaped_example}</pre>")
 
-    # Hints: as spoiler text (||text||)
+    # Hints: as blockquote or bold
     if hints and len(hints) > 0:
-        lines.append("\n*Hints:*")
+        lines.append("\n<b>Hints:</b>")
         for hint in hints[:3]:
-            lines.append(f"||{_esc(hint)}||")
+            escaped_hint = _html_escape(hint)
+            lines.append(f"<i>{escaped_hint}</i>")
 
     # Premium badge
     if is_paid:
-        lines.append("\n⚠️ _Premium only_")
+        lines.append("\n⚠️ <i>Premium only</i>")
 
     # Link to LeetCode
-    lines.append(f"\n[Open on LeetCode](https://leetcode.com/problems/{slug}/)")
+    lines.append(f"\n<a href=\"https://leetcode.com/problems/{slug}/\">Open on LeetCode</a>")
 
     return "\n".join(lines)
 

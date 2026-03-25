@@ -420,7 +420,7 @@ async def cmd_problem(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     text = format_problem_detail(question)
-    await update.message.reply_text(text, parse_mode="MarkdownV2", disable_web_page_preview=True)
+    await update.message.reply_text(text, parse_mode="HTML", disable_web_page_preview=True)
 
 
 async def cmd_challenge(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

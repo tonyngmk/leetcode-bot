@@ -104,7 +104,7 @@ class TestFormatProblemDetail:
     """Test format_problem_detail for MarkdownV2 validity."""
 
     def test_format_problem_detail_with_dots_in_content(self):
-        """Content with periods should be escaped."""
+        """Content with periods should render correctly in HTML mode."""
         question = {
             "questionFrontendId": "1",
             "title": "Two Sum",
@@ -119,17 +119,18 @@ class TestFormatProblemDetail:
             "isPaidOnly": False,
         }
         output = format_problem_detail(question)
-        # Content with dots should be escaped
-        assert "\\." in output, "Periods in content should be escaped"
+        # HTML mode: should use HTML tags, not backslash escaping
+        assert "<b>" in output, "Should use HTML bold tags"
+        assert "Given an array" in output, "Content should be present"
 
     def test_format_problem_detail_with_code_blocks(self):
-        """Code blocks in examples should preserve backticks."""
+        """Code blocks in examples should use HTML <pre> tags."""
         question = {
             "questionFrontendId": "1",
             "title": "Test",
             "titleSlug": "test",
             "difficulty": "Easy",
-            "content": "<p>Test.</p><pre><code>arr = [1, 2]</code></pre>",
+            "content": "<p>Test.</p><p><strong>Example 1:</strong></p><pre><code>arr = [1, 2]</code></pre>",
             "likes": 0,
             "dislikes": 0,
             "topicTags": [],
@@ -137,11 +138,12 @@ class TestFormatProblemDetail:
             "isPaidOnly": False,
         }
         output = format_problem_detail(question)
-        # Code block backticks should be preserved in examples
-        assert "```" in output, "Code block backticks should be present in output"
+        # HTML mode uses <pre> tags instead of markdown backticks
+        assert "<pre>" in output, "Code blocks should use HTML <pre> tags"
+        assert "arr = [1, 2]" in output, "Code content should be present"
 
     def test_format_problem_detail_with_equals_in_examples(self):
-        """Examples with = characters should escape them for MarkdownV2."""
+        """Examples with = characters should render correctly in HTML mode."""
         question = {
             "questionFrontendId": "1",
             "title": "Two Sum",
@@ -155,15 +157,16 @@ class TestFormatProblemDetail:
             "isPaidOnly": False,
         }
         output = format_problem_detail(question)
-        # = characters should be escaped as \= in examples section
-        assert "\\=" in output, "= characters in examples should be escaped for MarkdownV2"
-        # Code blocks should be present
-        assert "```" in output, "Examples should be in code blocks"
+        # HTML mode: no MarkdownV2 escaping needed
+        assert "<pre>" in output, "Examples should use <pre> tags"
+        assert "nums = [2,7,11,15]" in output, "Example content with equals should be present"
         # Description should not include the example content
         assert "Given two numbers" in output, "Description should be present"
+        # No MarkdownV2 escapes in HTML mode
+        assert output.count("\\=") == 0, "HTML mode should not have backslash escapes"
 
     def test_format_problem_detail_with_special_chars_in_hints(self):
-        """Hints with special chars should be escaped."""
+        """Hints with special chars should be properly HTML escaped."""
         question = {
             "questionFrontendId": "1",
             "title": "Test",
@@ -178,16 +181,15 @@ class TestFormatProblemDetail:
             "isPaidOnly": False,
         }
         output = format_problem_detail(question)
-        # Hints should be present and properly escaped
-        assert "||" in output, "Hints should use spoiler format"
-        # Should escape special chars in hints
-        assert "\\." in output or "Hint" in output, "Hints should be present"
+        # Hints should be present using HTML formatting
+        assert "<b>Hints:</b>" in output, "Hints section should be present"
+        assert "Hint" in output, "Hint text should be present"
 
     def test_format_problem_detail_with_all_special_chars(self):
-        """Test that all MarkdownV2 reserved chars in content are handled."""
+        """Test that all special chars in content are handled in HTML mode."""
         question = {
             "questionFrontendId": "1",
-            "title": "Special_*Test[1]",  # Multiple reserved chars
+            "title": "Special_*Test[1]",  # Multiple special chars
             "titleSlug": "special-test",
             "difficulty": "Hard",
             "content": "<p>Contains: _ * [ ] ( ) ~ ` > # + - = | { } . !</p>",
@@ -204,16 +206,18 @@ class TestFormatProblemDetail:
         assert isinstance(output, str), "Output should be a string"
         # Should contain some content
         assert len(output) > 0, "Output should not be empty"
+        # HTML mode: should use HTML tags
+        assert "<b>" in output, "Should use HTML formatting"
 
 
-class TestMarkdownV2Validity:
-    """Test that outputs don't contain obviously invalid MarkdownV2."""
+class TestHTMLValidity:
+    """Test that outputs are valid HTML and don't have parse errors."""
 
-    def test_no_unescaped_reserved_chars_in_plain_text(self):
-        """Unescaped reserved chars should only appear in proper markdown syntax."""
+    def test_html_special_chars_escaped(self):
+        """HTML special chars should be properly escaped."""
         question = {
             "questionFrontendId": "1",
-            "title": "Test Problem.",  # Period is problematic
+            "title": "Test Problem.",
             "titleSlug": "test-problem",
             "difficulty": "Easy",
             "content": "<p>This is test content with dots. And more!</p>",
@@ -226,15 +230,60 @@ class TestMarkdownV2Validity:
         }
         output = format_problem_detail(question)
 
-        # Check that periods and exclamation marks are escaped
-        # (They may appear unescaped in markdown syntax like *bold*, but not in plain text)
-        lines = output.split("\n")
-        for line in lines:
-            # Skip lines with markdown syntax (*, [, ], etc.)
-            if "*" not in line and "[" not in line and "]" not in line and "`" not in line:
-                # This line should have escaped dots
-                if "." in line:
-                    assert "\\." in line, f"Unescaped period in: {line}"
+        # HTML mode should use proper tags, not backslash escaping
+        assert "<b>" in output, "Should use HTML <b> tags for bold"
+        assert "<a " in output, "Should use HTML <a> tags for links"
+        # Content with special chars should be present
+        assert "Test Problem" in output, "Title should be present"
+        assert "test content" in output, "Content should be present"
+        # No MarkdownV2 escaping in HTML mode
+        assert output.count("\\") == 0, "HTML mode should not have backslash escapes"
+
+
+class TestParseMode:
+    """Test that output is compatible with Telegram parse modes."""
+
+    def test_no_null_bytes_in_output(self):
+        """Output should not contain null bytes that break Telegram parser."""
+        question = {
+            "questionFrontendId": "1",
+            "title": "Two Sum",
+            "titleSlug": "two-sum",
+            "difficulty": "Easy",
+            "content": '<p>Given an array.</p><p><strong>Example 1:</strong></p><pre><strong>Input:</strong> nums = [2,7,11,15], target = 9\n<strong>Output:</strong> [0,1]</pre>',
+            "likes": 100,
+            "dislikes": 5,
+            "topicTags": [{"name": "Array"}],
+            "hints": ["Use a hash map"],
+            "isPaidOnly": False,
+        }
+        output = format_problem_detail(question)
+        # Null bytes cause "can't find end of pre entity" error in Telegram
+        assert chr(0) not in output, "Output should not contain null bytes"
+
+    def test_equals_in_html_mode(self):
+        """Equals in examples should render correctly in HTML mode without escaping."""
+        question = {
+            "questionFrontendId": "1",
+            "title": "Two Sum",
+            "titleSlug": "two-sum",
+            "difficulty": "Easy",
+            "content": '<p>Test.</p><p><strong>Example 1:</strong></p><pre><strong>Input:</strong> nums = [1,2], target = 3\n<strong>Output:</strong> [0,1]</pre>',
+            "likes": 0,
+            "dislikes": 0,
+            "topicTags": [],
+            "hints": [],
+            "isPaidOnly": False,
+        }
+        output = format_problem_detail(question)
+        # HTML mode: equals should appear unescaped in <pre> blocks
+        assert "nums = [1,2]" in output, "Equals should be present unescaped in examples"
+        # Code blocks should use HTML <pre> tags
+        assert "<pre>" in output, "Code blocks should use <pre> tags"
+        # No MarkdownV2 escaping
+        assert output.count("\\=") == 0, "HTML mode should not have backslash-escaped equals"
+        # No null bytes that could break parser
+        assert chr(0) not in output, "Should not contain null bytes"
 
 
 class TestEdgeCases:
