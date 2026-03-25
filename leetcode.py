@@ -329,6 +329,24 @@ def extract_examples(content: str) -> list[str]:
     return examples
 
 
+def extract_images(content: str) -> list[str]:
+    """Extract image URLs from <img> tags in content HTML.
+
+    Matches: <img src="url" ...> or <img ... src="url" ...>
+    Returns: list of absolute URLs
+    """
+    if not content:
+        return []
+    images = []
+    # Pattern matches <img> tags with src attribute anywhere
+    pattern = r'<img\s+[^>]*src="([^"]+)"[^>]*>'
+    for match in re.finditer(pattern, content, re.IGNORECASE):
+        url = match.group(1)
+        if url:
+            images.append(url)
+    return images
+
+
 async def fetch_problems(
     difficulty: Optional[str] = None,
     tags: Optional[list[str]] = None,

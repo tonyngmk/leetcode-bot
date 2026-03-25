@@ -18,6 +18,7 @@ from formatter import (
     format_weekly,
     format_leaderboard,
 )
+from leetcode import extract_images
 
 
 # MarkdownV2 reserved characters that must be escaped: _*[]()~`>#+-=|{}.!
@@ -402,6 +403,77 @@ class TestParseMode:
         assert output.count("\\=") == 0, "HTML mode should not have backslash-escaped equals"
         # No null bytes that could break parser
         assert chr(0) not in output, "Should not contain null bytes"
+
+
+class TestImageExtraction:
+    """Test image extraction from problem content."""
+
+    def test_extract_single_image(self):
+        """Should extract a single image URL."""
+        content = '<p>Example</p><img src="https://example.com/image.png" />'
+        images = extract_images(content)
+        assert len(images) == 1
+        assert images[0] == "https://example.com/image.png"
+
+    def test_extract_multiple_images(self):
+        """Should extract multiple image URLs."""
+        content = '''
+        <p>First image:</p>
+        <img src="https://example.com/image1.png" />
+        <p>Second image:</p>
+        <img src="https://example.com/image2.jpg" alt="test" />
+        '''
+        images = extract_images(content)
+        assert len(images) == 2
+        assert "https://example.com/image1.png" in images
+        assert "https://example.com/image2.jpg" in images
+
+    def test_extract_images_with_attributes(self):
+        """Should extract images regardless of attribute order."""
+        content = '<img alt="test" width="100" src="https://example.com/image.png" class="problem-img" />'
+        images = extract_images(content)
+        assert len(images) == 1
+        assert images[0] == "https://example.com/image.png"
+
+    def test_extract_images_case_insensitive(self):
+        """Should match img tags case-insensitively."""
+        content = '<IMG SRC="https://example.com/image.png" />'
+        images = extract_images(content)
+        assert len(images) == 1
+        assert images[0] == "https://example.com/image.png"
+
+    def test_extract_no_images(self):
+        """Should return empty list when no images present."""
+        content = "<p>No images here</p>"
+        images = extract_images(content)
+        assert images == []
+
+    def test_extract_images_empty_content(self):
+        """Should return empty list for empty content."""
+        images = extract_images("")
+        assert images == []
+
+    def test_format_problem_detail_includes_images(self):
+        """format_problem_detail should include extracted images."""
+        question = {
+            "questionFrontendId": "1",
+            "title": "Image Problem",
+            "titleSlug": "image-problem",
+            "difficulty": "Easy",
+            "content": '<p>Problem with image:</p><img src="https://example.com/diagram.png" />',
+            "likes": 0,
+            "dislikes": 0,
+            "topicTags": [],
+            "hints": [],
+            "exampleTestcases": "",
+            "isPaidOnly": False,
+        }
+        output = format_problem_detail(question)
+        # Should contain "Diagrams" section
+        assert "Diagrams" in output, "Should have Diagrams section"
+        # Should contain image link
+        assert "example.com/diagram.png" in output, "Should contain image URL"
+        assert "<a href=" in output, "Should have image links"
 
 
 class TestEdgeCases:
