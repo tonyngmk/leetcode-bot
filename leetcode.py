@@ -1,5 +1,7 @@
 import asyncio
+import html
 import logging
+import re
 from datetime import datetime, timedelta, time
 from typing import Optional
 from zoneinfo import ZoneInfo
@@ -7,7 +9,14 @@ from zoneinfo import ZoneInfo
 import httpx
 
 import storage
-from config import FETCH_DELAY_SECONDS, LEETCODE_GRAPHQL_URL, USER_PROFILE_QUERY
+from config import (
+    DAILY_CHALLENGE_QUERY,
+    FETCH_DELAY_SECONDS,
+    LEETCODE_GRAPHQL_URL,
+    PROBLEM_DETAIL_QUERY,
+    PROBLEMS_QUERY,
+    USER_PROFILE_QUERY,
+)
 
 DIFFICULTY_EMOJI = {"Easy": "\U0001f7e2", "Medium": "\U0001f7e0", "Hard": "\U0001f534"}
 
@@ -231,3 +240,80 @@ async def fetch_all_users(usernames: list[str]) -> dict[str, Optional[dict]]:
             await asyncio.sleep(FETCH_DELAY_SECONDS)
         results[username] = await fetch_user_profile(username)
     return results
+
+
+def _strip_html(text: str) -> str:
+    """Strip HTML tags and unescape HTML entities."""
+    text = re.sub(r"<[^>]+>", "", text or "")
+    return html.unescape(text).strip()
+
+
+async def fetch_problems(
+    difficulty: Optional[str] = None,
+    tags: Optional[list[str]] = None,
+    limit: int = 20,
+) -> Optional[dict]:
+    """Fetch problem list with optional difficulty/tag filters.
+
+    Args:
+        difficulty: "EASY" | "MEDIUM" | "HARD" (uppercase)
+        tags: list of tag slugs e.g. ["array", "dynamic-programming"]
+        limit: number of problems to fetch (default 20)
+
+    Returns:
+        {"total": int, "questions": [...]} or None on failure
+    """
+    filters = {}
+    if difficulty:
+        filters["difficulty"] = difficulty
+    if tags:
+        filters["tags"] = tags
+
+    variables = {"categorySlug": "", "skip": 0, "limit": limit, "filters": filters}
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                LEETCODE_GRAPHQL_URL,
+                json={"query": PROBLEMS_QUERY, "variables": variables},
+                headers={"Content-Type": "application/json", "Referer": "https://leetcode.com"},
+            )
+            resp.raise_for_status()
+            data = resp.json().get("data", {})
+            return data.get("problemsetQuestionList")
+    except Exception:
+        logger.exception("Failed to fetch problems")
+        return None
+
+
+async def fetch_problem(slug: str) -> Optional[dict]:
+    """Fetch full detail for a single problem by slug."""
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                LEETCODE_GRAPHQL_URL,
+                json={"query": PROBLEM_DETAIL_QUERY, "variables": {"titleSlug": slug.lower().replace(" ", "-")}},
+                headers={"Content-Type": "application/json", "Referer": "https://leetcode.com"},
+            )
+            resp.raise_for_status()
+            data = resp.json().get("data", {})
+            return data.get("question")
+    except Exception:
+        logger.exception("Failed to fetch problem %s", slug)
+        return None
+
+
+async def fetch_daily_challenge() -> Optional[dict]:
+    """Fetch today's daily coding challenge."""
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                LEETCODE_GRAPHQL_URL,
+                json={"query": DAILY_CHALLENGE_QUERY},
+                headers={"Content-Type": "application/json", "Referer": "https://leetcode.com"},
+            )
+            resp.raise_for_status()
+            data = resp.json().get("data", {})
+            return data.get("activeDailyCodingChallengeQuestion")
+    except Exception:
+        logger.exception("Failed to fetch daily challenge")
+        return None

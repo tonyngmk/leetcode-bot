@@ -4,6 +4,7 @@ from zoneinfo import ZoneInfo
 
 from leetcode import (
     DIFFICULTY_EMOJI,
+    _strip_html,
     compute_diff,
     fetch_question_difficulties,
     filter_today_accepted,
@@ -406,3 +407,105 @@ def _esc(text: str) -> str:
         else:
             out.append(ch)
     return "".join(out)
+
+
+def format_problems(result: dict, filters_desc: str) -> str:
+    """Format problem list response."""
+    if not result:
+        return "Failed to fetch problems."
+
+    total = result.get("total", 0)
+    questions = result.get("questions", [])
+
+    if not questions:
+        return f"No problems found{f' matching {filters_desc}' if filters_desc else ''}."
+
+    lines = [f"*Problem List* {f'({filters_desc} — {total} total)' if filters_desc else f'({total} total)'}"]
+    lines.append("")
+
+    for q in questions:
+        frontend_id = q.get("questionFrontendId", "?")
+        title = _esc(q.get("title", "Unknown"))
+        slug = q.get("titleSlug", "")
+        difficulty = q.get("difficulty", "")
+        emoji = DIFFICULTY_EMOJI.get(difficulty, "")
+        ac_rate = q.get("acRate", 0)
+        tags = q.get("topicTags", [])
+        tags_str = " ".join(f"#{_esc(t['name'])}" for t in tags[:3])  # Limit to 3 tags
+
+        ac_rate_str = f"{ac_rate:.1f}%" if ac_rate else "?%"
+        line = f"{emoji} *{frontend_id}\\. [{title}](https://leetcode.com/problems/{slug}/) · {ac_rate_str}"
+        if tags_str:
+            line += f" · {tags_str}"
+        lines.append(line)
+
+    lines.append("")
+    lines.append(f"_Showing {len(questions)} of {total}\\. Use /problem \\<slug\\> for details\\._")
+
+    return "\n".join(lines)
+
+
+def format_problem_detail(question: dict) -> str:
+    """Format full problem detail."""
+    if not question:
+        return "Problem not found."
+
+    frontend_id = question.get("questionFrontendId", "?")
+    title = _esc(question.get("title", "Unknown"))
+    difficulty = question.get("difficulty", "")
+    emoji = DIFFICULTY_EMOJI.get(difficulty, "")
+    slug = question.get("titleSlug", "")
+    content = question.get("content", "")
+    likes = question.get("likes", 0)
+    dislikes = question.get("dislikes", 0)
+    tags = question.get("topicTags", [])
+    hints = question.get("hints", [])
+    examples = question.get("exampleTestcases", "")
+    is_paid = question.get("isPaidOnly", False)
+
+    lines = [f"{emoji} *{frontend_id}\\. {title}*"]
+
+    if tags:
+        tags_str = " · ".join(_esc(t["name"]) for t in tags)
+        lines.append(f"\n*Tags:* {tags_str}")
+
+    lines.append(f"👍 {likes}  👎 {dislikes}")
+
+    # Content: strip HTML and truncate
+    clean_content = _strip_html(content)
+    if clean_content:
+        if len(clean_content) > 800:
+            clean_content = clean_content[:800] + "…"
+        lines.append(f"\n{_esc(clean_content)}")
+
+    # Examples
+    if examples:
+        examples_clean = _strip_html(examples)[:500]
+        if examples_clean:
+            lines.append(f"\n*Example:*\n```\n{examples_clean}\n```")
+
+    # Hints
+    if hints and len(hints) > 0:
+        hints_str = "\n".join(f"• {_esc(h)}" for h in hints[:3])
+        lines.append(f"\n*Hints:*\n{hints_str}")
+
+    if is_paid:
+        lines.append("\n⚠️ _Premium only_")
+
+    lines.append(f"\n[Open on LeetCode](https://leetcode.com/problems/{slug}/)")
+
+    return "\n".join(lines)
+
+
+def format_daily_challenge(challenge: dict) -> str:
+    """Format today's daily challenge."""
+    if not challenge:
+        return "Failed to fetch daily challenge."
+
+    date = challenge.get("date", "")
+    question = challenge.get("question", {})
+
+    lines = [f"📅 *Daily Challenge — {date}*\n"]
+    lines.append(format_problem_detail(question))
+
+    return "\n".join(lines)

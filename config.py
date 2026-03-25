@@ -34,3 +34,72 @@ query getUserProfile($username: String!) {
   }
 }
 """
+
+PROBLEMS_QUERY = """
+query ($categorySlug: String, $limit: Int, $skip: Int, $filters: QuestionListFilterInput) {
+  problemsetQuestionList: questionList(
+    categorySlug: $categorySlug
+    limit: $limit
+    skip: $skip
+    filters: $filters
+  ) {
+    total: totalNum
+    questions: data {
+      acRate
+      difficulty
+      questionFrontendId
+      isPaidOnly
+      title
+      titleSlug
+      topicTags {
+        name
+        slug
+      }
+    }
+  }
+}
+"""
+
+PROBLEM_DETAIL_QUERY = """
+query ($titleSlug: String!) {
+  question(titleSlug: $titleSlug) {
+    questionFrontendId
+    title
+    titleSlug
+    content
+    difficulty
+    likes
+    dislikes
+    topicTags {
+      name
+      slug
+    }
+    hints
+    isPaidOnly
+    exampleTestcases
+    stats
+  }
+}
+"""
+
+DAILY_CHALLENGE_QUERY = """
+query {
+  activeDailyCodingChallengeQuestion {
+    date
+    link
+    question {
+      questionFrontendId
+      title
+      titleSlug
+      content
+      difficulty
+      topicTags {
+        name
+        slug
+      }
+      isPaidOnly
+      hints
+    }
+  }
+}
+"""

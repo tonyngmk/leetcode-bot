@@ -7,8 +7,22 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 
 import storage
 from config import BOT_TOKEN, VALID_INTERVALS
-from formatter import format_daily, format_leaderboard, format_weekly
-from leetcode import fetch_all_users, fetch_user_profile, take_snapshot
+from formatter import (
+    format_daily,
+    format_daily_challenge,
+    format_leaderboard,
+    format_problem_detail,
+    format_problems,
+    format_weekly,
+)
+from leetcode import (
+    fetch_all_users,
+    fetch_daily_challenge,
+    fetch_problem,
+    fetch_problems,
+    fetch_user_profile,
+    take_snapshot,
+)
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -130,13 +144,18 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     text = (
         "*LeetCode Tracker Bot*\n\n"
+        "*Tracking:*\n"
         "/add\\_user \\<username\\> \\- Track a LeetCode user\n"
         "/remove\\_user \\<username\\> \\- Stop tracking a user\n"
         "/users \\- List tracked users\n"
         "/summary \\- Daily \\+ weekly leaderboard\n"
         "/daily \\- Today's problems per user\n"
         "/weekly \\- This week's problems per user\n"
-        "/interval \\<30m\\|1h\\|2h\\|6h\\|1d\\|off\\> \\- Auto summary interval\n"
+        "/interval \\<30m\\|1h\\|2h\\|6h\\|1d\\|off\\> \\- Auto summary interval\n\n"
+        "*Browsing:*\n"
+        "/problems \\[difficulty\\] \\[tags\\] \\- Browse problems \\(e\\.g\\. /problems easy array\\)\n"
+        "/problem \\<slug\\> \\- Problem details \\(e\\.g\\. /problem two\\-sum\\)\n"
+        "/challenge \\- Today's daily challenge\n\n"
         "/help \\- Show this message"
     )
     await update.message.reply_text(text, parse_mode="MarkdownV2")
@@ -260,6 +279,51 @@ async def cmd_interval(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await update.message.reply_text(f"Automatic summary set to every {interval_key}.")
 
 
+async def cmd_problems(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    args = [a.lower() for a in (context.args or [])]
+    difficulty = None
+    tags = []
+    for arg in args:
+        if arg in ("easy", "medium", "hard"):
+            difficulty = arg.upper()
+        else:
+            tags.append(arg)
+
+    result = await fetch_problems(difficulty=difficulty, tags=tags or None)
+    if result is None:
+        await update.message.reply_text("Failed to fetch problems.")
+        return
+
+    filters_desc = " · ".join(filter(None, ([difficulty.capitalize()] if difficulty else []) + tags))
+    text = format_problems(result, filters_desc)
+    await update.message.reply_text(text, parse_mode="MarkdownV2", disable_web_page_preview=True)
+
+
+async def cmd_problem(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not context.args:
+        await update.message.reply_text("Usage: /problem <title-slug>  e.g. /problem two-sum")
+        return
+
+    slug = context.args[0]
+    question = await fetch_problem(slug)
+    if question is None:
+        await update.message.reply_text(f"Problem '{slug}' not found.")
+        return
+
+    text = format_problem_detail(question)
+    await update.message.reply_text(text, parse_mode="MarkdownV2", disable_web_page_preview=True)
+
+
+async def cmd_challenge(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    challenge = await fetch_daily_challenge()
+    if challenge is None:
+        await update.message.reply_text("Failed to fetch daily challenge.")
+        return
+
+    text = format_daily_challenge(challenge)
+    await update.message.reply_text(text, parse_mode="MarkdownV2", disable_web_page_preview=True)
+
+
 # --- Startup ---
 
 async def post_init(app: Application) -> None:
@@ -292,6 +356,9 @@ def main() -> None:
     app.add_handler(CommandHandler("daily", cmd_daily))
     app.add_handler(CommandHandler("weekly", cmd_weekly))
     app.add_handler(CommandHandler("interval", cmd_interval))
+    app.add_handler(CommandHandler("problems", cmd_problems))
+    app.add_handler(CommandHandler("problem", cmd_problem))
+    app.add_handler(CommandHandler("challenge", cmd_challenge))
 
     logger.info("Bot starting...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
