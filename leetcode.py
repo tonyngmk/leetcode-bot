@@ -243,9 +243,19 @@ async def fetch_all_users(usernames: list[str]) -> dict[str, Optional[dict]]:
 
 
 def _strip_html(text: str) -> str:
-    """Strip HTML tags and unescape HTML entities."""
-    text = re.sub(r"<[^>]+>", "", text or "")
-    return html.unescape(text).strip()
+    """Strip HTML tags and unescape HTML entities, converting <code> to backticks."""
+    text = text or ""
+    # First unescape to handle &lt; &gt; etc.
+    text = html.unescape(text)
+    # Replace code blocks: <pre><code>...content...</code></pre>
+    text = re.sub(r'<pre><code>(.*?)</code></pre>', r'```\1```', text, flags=re.DOTALL)
+    # Replace inline code: <code>...content...</code>
+    text = re.sub(r'<code>(.*?)</code>', r'`\1`', text)
+    # Remove all other HTML tags
+    text = re.sub(r"<[^>]+>", "", text)
+    # Final unescape in case there are any remaining entities
+    text = html.unescape(text).strip()
+    return text
 
 
 async def fetch_problems(

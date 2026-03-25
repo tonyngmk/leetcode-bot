@@ -483,8 +483,7 @@ def format_problem_detail(question: dict) -> str:
     if examples:
         examples_clean = _strip_html(examples)[:500]
         if examples_clean:
-            # Escape all reserved characters for MarkdownV2
-            examples_clean = _esc(examples_clean)
+            # No escaping needed inside code blocks in MarkdownV2
             lines.append(f"\n*Example:*\n```\n{examples_clean}\n```")
 
     # Hints
