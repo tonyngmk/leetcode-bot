@@ -147,7 +147,7 @@ class TestFormatProblemDetail:
             "title": "Two Sum",
             "titleSlug": "two-sum",
             "difficulty": "Easy",
-            "content": '<p>Test.</p><pre><strong>Input:</strong> nums = [2,7,11,15], target = 9\n<strong>Output:</strong> [0,1]</pre>',
+            "content": '<p>Given two numbers, find their sum.</p><p><strong>Example 1:</strong></p><pre><strong>Input:</strong> nums = [2,7,11,15], target = 9\n<strong>Output:</strong> [0,1]</pre>',
             "likes": 0,
             "dislikes": 0,
             "topicTags": [],
@@ -155,10 +155,12 @@ class TestFormatProblemDetail:
             "isPaidOnly": False,
         }
         output = format_problem_detail(question)
-        # = characters should be escaped as \= in output
+        # = characters should be escaped as \= in examples section
         assert "\\=" in output, "= characters in examples should be escaped for MarkdownV2"
         # Code blocks should be present
         assert "```" in output, "Examples should be in code blocks"
+        # Description should not include the example content
+        assert "Given two numbers" in output, "Description should be present"
 
     def test_format_problem_detail_with_special_chars_in_hints(self):
         """Hints with special chars should be escaped."""
