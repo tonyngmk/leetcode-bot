@@ -435,7 +435,7 @@ def format_problems(result: dict, filters_desc: str) -> str:
         tags_str = " ".join(f"\\#{_esc(t['name'])}" for t in tags[:3])  # Limit to 3 tags
 
         ac_rate_str = _esc(f"{ac_rate:.1f}%") if ac_rate else "?%"
-        line = f"{emoji} *{frontend_id}\\. [{title}](https://leetcode.com/problems/{slug}/) · {ac_rate_str}"
+        line = f"{emoji} *{frontend_id}\\. [{title}](https://leetcode.com/problems/{slug}/) `{slug}` · {ac_rate_str}"
         if tags_str:
             line += f" · {tags_str}"
         lines.append(line)
