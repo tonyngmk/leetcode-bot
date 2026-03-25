@@ -7,6 +7,7 @@ from leetcode import (
     _strip_html,
     compute_diff,
     extract_constraints,
+    extract_description,
     extract_examples,
     fetch_question_difficulties,
     filter_today_accepted,
@@ -509,8 +510,9 @@ def format_problem_detail(question: dict) -> str:
     # Engagement metrics
     lines.append(f"👍 {likes}  👎 {dislikes}")
 
-    # Description: strip HTML and escape for MarkdownV2 (preserves backticks from _strip_html)
-    clean_content = _strip_html(content)
+    # Description: extract only description part (before examples/constraints), then format
+    description_html = extract_description(content)
+    clean_content = _strip_html(description_html)
     if clean_content:
         # Remove excessive line breaks and truncate if needed
         clean_content = " ".join(clean_content.split())  # Normalize whitespace

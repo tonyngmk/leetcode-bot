@@ -284,6 +284,22 @@ def extract_constraints(content: str) -> list[str]:
     return constraints
 
 
+def extract_description(content: str) -> str:
+    """Extract only the problem description, removing examples and constraints sections.
+
+    LeetCode's content has: description → examples → constraints → follow-up.
+    We only want the description part (everything before 'Example' heading).
+    """
+    if not content:
+        return ""
+    # Find where examples start (marked by <strong>Example or <p><strong>Example)
+    # Everything before this is the description
+    match = re.search(r'<(?:p>)?<strong>Example', content, re.IGNORECASE)
+    if match:
+        content = content[:match.start()]
+    return content
+
+
 def extract_examples(content: str) -> list[str]:
     """Extract formatted examples from <pre> blocks in content HTML.
 
