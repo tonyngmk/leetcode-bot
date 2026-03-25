@@ -18,7 +18,7 @@ from formatter import (
     format_weekly,
     format_leaderboard,
 )
-from leetcode import extract_images
+from leetcode import extract_images, map_images_to_examples
 
 
 # MarkdownV2 reserved characters that must be escaped: _*[]()~`>#+-=|{}.!
@@ -477,6 +477,48 @@ class TestImageExtraction:
         assert any("png" in url for url in images)
         assert any("jpeg" in url for url in images)
         assert not any("gif" in url for url in images)
+
+    def test_map_images_to_examples_single(self):
+        """Should map a single image to its corresponding example."""
+        content = '''
+        <pre>Example 1: Input: [1,2,3] Output: [3,2,1]</pre>
+        <img src="https://example.com/image1.jpeg" />
+        '''
+        mapping = map_images_to_examples(content)
+        assert len(mapping) == 1
+        assert mapping["https://example.com/image1.jpeg"] == 1
+
+    def test_map_images_to_examples_multiple(self):
+        """Should map multiple images to their corresponding examples."""
+        content = '''
+        <pre>Example 1: [1,2]</pre>
+        <img src="https://example.com/image1.jpeg" />
+        <pre>Example 2: [3,4]</pre>
+        <img src="https://example.com/image2.jpeg" />
+        '''
+        mapping = map_images_to_examples(content)
+        assert len(mapping) == 2
+        assert mapping["https://example.com/image1.jpeg"] == 1
+        assert mapping["https://example.com/image2.jpeg"] == 2
+
+    def test_map_images_to_examples_image_without_example(self):
+        """Should map image to None if no nearby example."""
+        content = '<img src="https://example.com/orphan.jpeg" />'
+        mapping = map_images_to_examples(content)
+        assert len(mapping) == 1
+        assert mapping["https://example.com/orphan.jpeg"] is None
+
+    def test_map_images_to_examples_filters_by_type(self):
+        """Should only map filtered image types."""
+        content = '''
+        <pre>Example 1: test</pre>
+        <img src="https://example.com/image.png" />
+        <img src="https://example.com/image.jpeg" />
+        '''
+        mapping = map_images_to_examples(content)  # Default: jpeg only
+        assert len(mapping) == 1
+        assert "image.jpeg" in list(mapping.keys())[0]
+        assert "png" not in str(mapping)
 
 
 class TestEdgeCases:

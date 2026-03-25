@@ -25,6 +25,7 @@ from leetcode import (
     fetch_problem,
     fetch_problems,
     fetch_user_profile,
+    map_images_to_examples,
     take_snapshot,
 )
 
@@ -156,12 +157,18 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         # format_problem_detail outputs HTML, not MarkdownV2
         await update.message.reply_text(text, parse_mode="HTML", disable_web_page_preview=True)
 
-        # Send problem images as separate photo messages
+        # Send problem images as separate photo messages with captions
         content = question.get("content", "")
         images = extract_images(content)  # Filters to .jpeg by default
+        image_mapping = map_images_to_examples(content)  # Map images to example numbers
         for image_url in images[:3]:  # Limit to 3 images
             try:
-                await update.message.reply_photo(image_url)
+                example_num = image_mapping.get(image_url)
+                if example_num:
+                    caption = f"Example {example_num}"
+                else:
+                    caption = None
+                await update.message.reply_photo(image_url, caption=caption)
             except Exception as e:
                 logger.warning(f"Failed to send image {image_url}: {e}")
         return
@@ -433,12 +440,18 @@ async def cmd_problem(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     text = format_problem_detail(question)
     await update.message.reply_text(text, parse_mode="HTML", disable_web_page_preview=True)
 
-    # Send problem images as separate photo messages
+    # Send problem images as separate photo messages with captions
     content = question.get("content", "")
     images = extract_images(content)  # Filters to .jpeg by default
+    image_mapping = map_images_to_examples(content)  # Map images to example numbers
     for image_url in images[:3]:  # Limit to 3 images
         try:
-            await update.message.reply_photo(image_url)
+            example_num = image_mapping.get(image_url)
+            if example_num:
+                caption = f"Example {example_num}"
+            else:
+                caption = None
+            await update.message.reply_photo(image_url, caption=caption)
         except Exception as e:
             logger.warning(f"Failed to send image {image_url}: {e}")
 

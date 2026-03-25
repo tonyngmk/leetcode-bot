@@ -358,6 +358,63 @@ def extract_images(content: str, image_types: Optional[list[str]] = None) -> lis
     return images
 
 
+def map_images_to_examples(content: str, image_types: Optional[list[str]] = None) -> dict[str, Optional[int]]:
+    """Map image URLs to their corresponding example numbers based on HTML position.
+
+    Args:
+        content: HTML content to analyze
+        image_types: List of allowed file extensions (default: ["jpeg", "jpg"])
+
+    Returns:
+        Dict mapping image URLs to example numbers (1-indexed), or None if not associated with an example.
+        Example: {"https://...image1.jpeg": 1, "https://...image2.jpeg": 2}
+    """
+    if not content:
+        return {}
+    if image_types is None:
+        image_types = ["jpeg", "jpg"]
+
+    # Find all <pre> blocks (examples) with their positions
+    examples = []
+    pre_pattern = r'<pre>(.*?)</pre>'
+    for match in re.finditer(pre_pattern, content, re.DOTALL):
+        examples.append({
+            'start': match.start(),
+            'end': match.end(),
+            'content': match.group(1)
+        })
+
+    # Find all <img> tags with their positions and URLs
+    images_with_pos = []
+    img_pattern = r'<img\s+[^>]*src="([^"]+)"[^>]*>'
+    for match in re.finditer(img_pattern, content, re.IGNORECASE):
+        url = match.group(1)
+        if url:
+            url_lower = url.lower()
+            if any(url_lower.endswith(f".{ext}") for ext in image_types):
+                images_with_pos.append({
+                    'url': url,
+                    'pos': match.start()
+                })
+
+    # Map each image to the closest example
+    mapping = {}
+    for img in images_with_pos:
+        closest_example_num = None
+        closest_distance = float('inf')
+
+        for i, example in enumerate(examples, 1):
+            # Distance to the end of the example (prefer images right after)
+            distance = abs(img['pos'] - example['end'])
+            if distance < closest_distance:
+                closest_distance = distance
+                closest_example_num = i
+
+        mapping[img['url']] = closest_example_num
+
+    return mapping
+
+
 async def fetch_problems(
     difficulty: Optional[str] = None,
     tags: Optional[list[str]] = None,
