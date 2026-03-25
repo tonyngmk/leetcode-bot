@@ -543,8 +543,8 @@ def format_problem_detail(question: dict) -> str:
     description_html = extract_description(content)
     clean_content = _strip_html(description_html)
     if clean_content:
-        # Remove excessive line breaks and truncate if needed
-        clean_content = " ".join(clean_content.split())
+        # Normalize whitespace but preserve paragraph breaks (multiple spaces indicate new paragraphs)
+        clean_content = clean_content.strip()
         if len(clean_content) > 600:
             clean_content = clean_content[:600] + "…"
         # Escape HTML special chars first
@@ -559,6 +559,8 @@ def format_problem_detail(question: dict) -> str:
         lines.append("\n<b>Constraints:</b>")
         for constraint in constraints[:5]:
             escaped_constraint = _html_escape(constraint)
+            # Convert backticks to code tags for consistency
+            escaped_constraint = _convert_backticks_to_html(escaped_constraint)
             lines.append(f"• {escaped_constraint}")
 
     # Examples: extract from <pre> blocks in content HTML
@@ -570,12 +572,14 @@ def format_problem_detail(question: dict) -> str:
             escaped_example = _html_escape(example)
             lines.append(f"<pre>{escaped_example}</pre>")
 
-    # Hints: as blockquote or bold
+    # Hints: as spoilers (using Telegram's tg-spoiler tag)
     if hints and len(hints) > 0:
         lines.append("\n<b>Hints:</b>")
         for hint in hints[:3]:
             escaped_hint = _html_escape(hint)
-            lines.append(f"<i>{escaped_hint}</i>")
+            # Convert backticks to code tags
+            escaped_hint = _convert_backticks_to_html(escaped_hint)
+            lines.append(f"<tg-spoiler>{escaped_hint}</tg-spoiler>")
 
     # Premium badge
     if is_paid:

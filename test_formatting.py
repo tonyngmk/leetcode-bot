@@ -281,9 +281,32 @@ class TestHTMLCodeTags:
         # Count all HTML tag pairs
         assert output.count("<b>") == output.count("</b>"), "<b> tags should match"
         assert output.count("<code>") == output.count("</code>"), "<code> tags should match"
-        assert output.count("<i>") == output.count("</i>"), "<i> tags should match"
+        assert output.count("<tg-spoiler>") == output.count("</tg-spoiler>"), "Spoiler tags should match"
         assert output.count("<a") == output.count("</a>"), "<a> tags should match"
         assert output.count("<pre>") == output.count("</pre>"), "<pre> tags should match"
+
+    def test_hints_use_spoiler_tags(self):
+        """Hints should use Telegram spoiler formatting, not italics."""
+        question = {
+            "questionFrontendId": "1",
+            "title": "Test",
+            "titleSlug": "test",
+            "difficulty": "Easy",
+            "content": "<p>Test.</p>",
+            "likes": 0,
+            "dislikes": 0,
+            "topicTags": [],
+            "hints": ["Hint 1", "Hint 2"],
+            "isPaidOnly": False,
+        }
+        output = format_problem_detail(question)
+        # Should use spoiler tags, not italics
+        assert "<tg-spoiler>" in output, "Hints should use spoiler tags"
+        assert "Hint 1" in output, "Hint text should be present"
+        # Should not use italic tags for hints
+        lines_with_hints = [l for l in output.split('\n') if 'Hint' in l]
+        for line in lines_with_hints:
+            assert "<i>" not in line, "Hints should not use italic tags"
 
 
 class TestParseMode:
