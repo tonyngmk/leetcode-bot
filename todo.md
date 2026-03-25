@@ -59,34 +59,55 @@ and see bot's `/problem <slug>` details (to iterate through the list without lea
 
 ---
 
-## Feature 4: Research - Problem images
+## Feature 4: Problem Images Integration (Research Complete)
 
-**Problem**: Some LeetCode problems include images (e.g. tree diagrams). Does the API return image URLs?
+**Finding**: Images ARE available but require custom extraction
+
+### Details
+- Images embedded in problem `content` field as HTML: `<img src="https://assets.leetcode.com/uploads/...">`
+- Current `_strip_html()` discards all HTML including `<img>` tags
+- LeetCode CDN URLs are public/accessible without auth
+- Would need to parse `<img src="...">` from HTML before stripping
 
 ### Sub-tasks
-- [ ] 4a. Research: Are image URLs embedded in problem `content` HTML as `<img src="...">` tags?
-- [ ] 4b. If yes: Extract image URLs from HTML content; send as separate media messages
-- [ ] 4c. Research: Are LeetCode's image URLs public/accessible without auth?
-- [ ] 4d. Decision: Implement or skip based on findings
+- [ ] 4a. Modify `_strip_html()` or create new function to extract image URLs from content HTML
+- [ ] 4b. Extract src attributes: pattern `<img\s+[^>]*src="([^"]+)"[^>]*>`
+- [ ] 4c. Update `format_problem_detail()` to include image URLs
+- [ ] 4d. Option: Send images as separate Telegram photo messages or embed URLs in problem detail
 
-**Status**: Research needed
+**Status**: Ready to implement; depends on priority
 
 ---
 
-## Feature 5: Research - Solutions API + /solution command
+## Feature 5: Solutions API + /solution command (Research Complete)
 
-**Problem**: Users want to see solutions for problems via `/solution <slug> <language>`.
+**Finding**: No public unauthenticated solutions API available
+
+### Details
+- Community solutions: `questionSolutionArticles` field exists but **requires authentication**
+- Editorial solutions: `officialSolution` field **requires authentication + Premium for some problems**
+- No public GraphQL endpoint without `Cookie: LEETCODE_SESSION=...` header
+- Current bot uses only public unauthenticated endpoints (question, questionList, etc.)
+
+### To Implement (requires auth):
+Would need to:
+1. Add `LEETCODE_SESSION` environment variable for authenticated requests
+2. Implement authentication header in leetcode.py `httpx.AsyncClient` requests
+3. Add `SOLUTIONS_QUERY` to config.py with `questionSolutionArticles` field
+4. Create `fetch_solutions(slug, language, session_cookie)` in leetcode.py
+5. Create `format_solution()` in formatter.py
+6. Add `/solution <slug> [language]` command to bot.py
 
 ### Sub-tasks
-- [ ] 5a. Research: Does LeetCode GraphQL have a public community solutions endpoint?
-- [ ] 5b. Research: What authentication is required for solutions API?
-- [ ] 5c. If public API exists: Add `SOLUTIONS_QUERY` to config.py
-- [ ] 5d. If public API exists: Implement `fetch_solutions(slug, language)` in leetcode.py
-- [ ] 5e. If public API exists: Implement `format_solution()` in formatter.py
-- [ ] 5f. If public API exists: Add `/solution <slug> [language]` command to bot.py
-- [ ] 5g. If public API exists: Add to help text and register handler
+- [ ] 5a. Decide: Is adding authentication scope worth it?
+- [ ] 5b. If yes: Create auth.py or modify leetcode.py to handle `LEETCODE_SESSION`
+- [ ] 5c. If yes: Update config.py with SOLUTIONS_QUERY
+- [ ] 5d. If yes: Implement `fetch_solutions()` in leetcode.py
+- [ ] 5e. If yes: Add format_solution() in formatter.py
+- [ ] 5f. If yes: Add /solution command handler to bot.py
+- [ ] 5g. If yes: Update help text
 
-**Status**: Research needed
+**Status**: Blocked on authentication architecture decision. Recommend skipping for now due to complexity.
 
 ---
 
