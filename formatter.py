@@ -7,6 +7,7 @@ from leetcode import (
     _strip_html,
     compute_diff,
     extract_constraints,
+    extract_examples,
     fetch_question_difficulties,
     filter_today_accepted,
     filter_week_accepted,
@@ -495,7 +496,7 @@ def format_problem_detail(question: dict) -> str:
     dislikes = question.get("dislikes", 0)
     tags = question.get("topicTags", [])
     hints = question.get("hints", [])
-    examples = question.get("exampleTestcases", "")
+    # Note: examples are extracted from content HTML <pre> blocks, not from exampleTestcases
     is_paid = question.get("isPaidOnly", False)
 
     lines = [f"{emoji} *{frontend_id}\\. {title}*"]
@@ -526,15 +527,14 @@ def format_problem_detail(question: dict) -> str:
         for constraint in constraints[:5]:
             lines.append(f"• {_esc(constraint)}")
 
-    # Examples: as blockquote (> prefix each line)
+    # Examples: extract from <pre> blocks in content HTML (not from exampleTestcases)
+    # Each example is properly formatted with Input: / Output: / Explanation: labels
+    examples = extract_examples(content)
     if examples:
-        examples_clean = _strip_html(examples)[:400]
-        if examples_clean:
-            lines.append("\n*Example:*")
-            # Escape but preserve code backticks, then prefix with > for blockquote
-            escaped_examples = _esc_preserve_code(examples_clean)
-            quoted = "\n".join(f"> {line}" for line in escaped_examples.split("\n"))
-            lines.append(quoted)
+        for i, example in enumerate(examples[:3], 1):
+            lines.append(f"\n*Example {i}:*")
+            # Use code block to preserve formatting and monospace style
+            lines.append(f"```\n{example}\n```")
 
     # Hints: as spoiler text (||text||)
     if hints and len(hints) > 0:

@@ -243,19 +243,27 @@ async def fetch_all_users(usernames: list[str]) -> dict[str, Optional[dict]]:
 
 
 def _strip_html(text: str) -> str:
-    """Strip HTML tags and unescape HTML entities, preserving code block formatting."""
+    """Strip HTML tags and unescape entities. Crucially: unescape LAST.
+
+    The order matters! If we unescape first, &lt;= becomes real < which then gets
+    matched by the HTML-stripping regex <[^>]+> as a fake tag, truncating content.
+    So we:
+    1. Convert <sup> to ^n notation (preserves exponents)
+    2. Process code blocks and inline code
+    3. Strip remaining HTML tags (safe — no unescaped < yet)
+    4. THEN unescape entities (&lt; → <, etc.)
+    """
     text = text or ""
-    # First unescape to handle &lt; &gt; etc.
-    text = html.unescape(text)
-    # Replace code blocks: preserve backticks for MarkdownV2
-    # <pre><code>...content...</code></pre> → ```...content...```
+    # FIRST: Convert <sup> to ^n notation before anything else (e.g. 10<sup>4</sup> → 10^4)
+    text = re.sub(r'<sup>(.*?)</sup>', r'^\1', text, flags=re.DOTALL)
+    # Replace code blocks: <pre><code>...</code></pre> → ```...```
     text = re.sub(r'<pre><code>(.*?)</code></pre>', r'```\1```', text, flags=re.DOTALL)
-    # Replace inline code: preserve backticks
-    # <code>...content...</code> → `...content...`
+    # Replace inline code: <code>...</code> → `...`
     text = re.sub(r'<code>(.*?)</code>', r'`\1`', text)
-    # Remove other HTML tags (paragraphs, lists, divs, etc.)
-    text = re.sub(r"<[^>]+>", "", text)
-    # Final unescape in case there are any remaining entities
+    # Remove remaining HTML tags (safe now — entities still encoded as &lt; etc.)
+    text = re.sub(r'<[^>]+>', '', text)
+    # LAST: NOW unescape HTML entities (&lt; → <, etc.)
+    # This happens AFTER tag stripping, so <= comparison operators won't be mistaken for tags
     text = html.unescape(text).strip()
     return text
 
@@ -274,6 +282,36 @@ def extract_constraints(content: str) -> list[str]:
         if constraint:
             constraints.append(constraint)
     return constraints
+
+
+def extract_examples(content: str) -> list[str]:
+    """Extract formatted examples from <pre> blocks in content HTML.
+
+    LeetCode's content field contains <pre> blocks with:
+      Input: nums = [2,7,11,15], target = 9
+      Output: [0,1]
+      Explanation: Because nums[0] + nums[1] == 9, we return [0, 1].
+    """
+    if not content:
+        return []
+    examples = []
+    pattern = r'<pre>(.*?)</pre>'
+    for match in re.finditer(pattern, content, re.DOTALL):
+        pre_content = match.group(1)
+        # Unwrap <strong> tags while keeping the text (e.g., <strong>Input:</strong> → Input:)
+        pre_content = re.sub(r'<strong>(.*?)</strong>', r'\1', pre_content)
+        # Convert <sup> to ^n notation before stripping
+        pre_content = re.sub(r'<sup>(.*?)</sup>', r'^\1', pre_content)
+        # Strip remaining HTML tags
+        pre_content = re.sub(r'<[^>]+>', '', pre_content)
+        # Unescape HTML entities after HTML is removed
+        pre_content = html.unescape(pre_content)
+        # Normalize whitespace: trim each line, remove empty lines
+        lines = [line.strip() for line in pre_content.split('\n')]
+        pre_content = '\n'.join(line for line in lines if line)
+        if pre_content:
+            examples.append(pre_content)
+    return examples
 
 
 async def fetch_problems(

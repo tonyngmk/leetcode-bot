@@ -129,17 +129,16 @@ class TestFormatProblemDetail:
             "title": "Test",
             "titleSlug": "test",
             "difficulty": "Easy",
-            "content": "<p>Test.</p>",
+            "content": "<p>Test.</p><pre><code>arr = [1, 2]</code></pre>",
             "likes": 0,
             "dislikes": 0,
             "topicTags": [],
             "hints": [],
-            "exampleTestcases": "<pre><code>arr = [1, 2]</code></pre>",
             "isPaidOnly": False,
         }
         output = format_problem_detail(question)
-        # Code block backticks should be preserved
-        assert "```" in output, "Code block backticks should be present"
+        # Code block backticks should be preserved in examples
+        assert "```" in output, "Code block backticks should be present in output"
 
     def test_format_problem_detail_with_special_chars_in_hints(self):
         """Hints with special chars should be escaped."""
