@@ -434,7 +434,7 @@ def format_problems(result: dict, filters_desc: str) -> str:
         tags = q.get("topicTags", [])
         tags_str = " ".join(f"#{_esc(t['name'])}" for t in tags[:3])  # Limit to 3 tags
 
-        ac_rate_str = f"{ac_rate:.1f}%" if ac_rate else "?%"
+        ac_rate_str = _esc(f"{ac_rate:.1f}%") if ac_rate else "?%"
         line = f"{emoji} *{frontend_id}\\. [{title}](https://leetcode.com/problems/{slug}/) · {ac_rate_str}"
         if tags_str:
             line += f" · {tags_str}"
@@ -483,8 +483,8 @@ def format_problem_detail(question: dict) -> str:
     if examples:
         examples_clean = _strip_html(examples)[:500]
         if examples_clean:
-            # Escape parentheses even in code blocks for MarkdownV2 safety
-            examples_clean = examples_clean.replace("(", "\\(").replace(")", "\\)")
+            # Escape all reserved characters for MarkdownV2
+            examples_clean = _esc(examples_clean)
             lines.append(f"\n*Example:*\n```\n{examples_clean}\n```")
 
     # Hints
@@ -505,7 +505,7 @@ def format_daily_challenge(challenge: dict) -> str:
     if not challenge:
         return "Failed to fetch daily challenge."
 
-    date = challenge.get("date", "")
+    date = _esc(challenge.get("date", ""))
     question = challenge.get("question", {})
 
     lines = [f"📅 *Daily Challenge — {date}*\n"]

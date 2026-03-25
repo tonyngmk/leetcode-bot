@@ -8,6 +8,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 import storage
 from config import BOT_TOKEN, VALID_INTERVALS
 from formatter import (
+    _esc,
     format_daily,
     format_daily_challenge,
     format_leaderboard,
@@ -295,7 +296,8 @@ async def cmd_problems(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
 
     filters_desc = " · ".join(filter(None, ([difficulty.capitalize()] if difficulty else []) + tags))
-    text = format_problems(result, filters_desc)
+    filters_desc_escaped = _esc(filters_desc)
+    text = format_problems(result, filters_desc_escaped)
     await update.message.reply_text(text, parse_mode="MarkdownV2", disable_web_page_preview=True)
 
 
