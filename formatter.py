@@ -420,7 +420,8 @@ def format_problems(result: dict, filters_desc: str) -> str:
     if not questions:
         return f"No problems found{f' matching {filters_desc}' if filters_desc else ''}."
 
-    lines = [f"*Problem List* {f'({filters_desc} — {total} total)' if filters_desc else f'({total} total)'}"]
+    filter_part = f"\\({filters_desc} — {total} total\\)" if filters_desc else f"\\({total} total\\)"
+    lines = [f"*Problem List* {filter_part}"]
     lines.append("")
 
     for q in questions:
@@ -482,6 +483,8 @@ def format_problem_detail(question: dict) -> str:
     if examples:
         examples_clean = _strip_html(examples)[:500]
         if examples_clean:
+            # Escape parentheses even in code blocks for MarkdownV2 safety
+            examples_clean = examples_clean.replace("(", "\\(").replace(")", "\\)")
             lines.append(f"\n*Example:*\n```\n{examples_clean}\n```")
 
     # Hints
