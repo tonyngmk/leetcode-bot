@@ -240,6 +240,52 @@ class TestHTMLValidity:
         assert output.count("\\") == 0, "HTML mode should not have backslash escapes"
 
 
+class TestHTMLCodeTags:
+    """Test that HTML code tags are properly matched."""
+
+    def test_backticks_converted_to_code_tags(self):
+        """Backticks should be converted to matching <code></code> tags."""
+        question = {
+            "questionFrontendId": "1",
+            "title": "Test",
+            "titleSlug": "test",
+            "difficulty": "Easy",
+            "content": "<p>Use `array` or `list` for this.</p>",
+            "likes": 0,
+            "dislikes": 0,
+            "topicTags": [],
+            "hints": [],
+            "isPaidOnly": False,
+        }
+        output = format_problem_detail(question)
+        # Should have properly matched code tags
+        assert output.count("<code>") == output.count("</code>"), "Code tags should be matched"
+        assert "<code>array</code>" in output, "First backtick pair should be converted"
+        assert "<code>list</code>" in output, "Second backtick pair should be converted"
+
+    def test_no_unmatched_html_tags(self):
+        """All HTML tags should be properly closed."""
+        question = {
+            "questionFrontendId": "42",
+            "title": "Complex Problem with `code` and stuff",
+            "titleSlug": "complex-problem",
+            "difficulty": "Medium",
+            "content": "<p>Description with `inline code` and other content.</p>",
+            "likes": 50,
+            "dislikes": 10,
+            "topicTags": [{"name": "String"}, {"name": "Array"}],
+            "hints": ["Hint with `code`"],
+            "isPaidOnly": False,
+        }
+        output = format_problem_detail(question)
+        # Count all HTML tag pairs
+        assert output.count("<b>") == output.count("</b>"), "<b> tags should match"
+        assert output.count("<code>") == output.count("</code>"), "<code> tags should match"
+        assert output.count("<i>") == output.count("</i>"), "<i> tags should match"
+        assert output.count("<a") == output.count("</a>"), "<a> tags should match"
+        assert output.count("<pre>") == output.count("</pre>"), "<pre> tags should match"
+
+
 class TestParseMode:
     """Test that output is compatible with Telegram parse modes."""
 

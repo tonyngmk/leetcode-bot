@@ -1,3 +1,4 @@
+import re
 from datetime import datetime
 from typing import Optional
 from zoneinfo import ZoneInfo
@@ -494,6 +495,23 @@ def _html_escape(text: str) -> str:
     return text
 
 
+def _convert_backticks_to_html(text: str) -> str:
+    """Convert backtick pairs to HTML <code> tags.
+
+    Handles both inline code (`code`) and code blocks (```code```).
+    """
+    if not text:
+        return text
+
+    # Replace code blocks first: ```code``` → <pre>code</pre>
+    text = re.sub(r'```(.*?)```', r'<pre>\1</pre>', text, flags=re.DOTALL)
+
+    # Then replace inline code: `code` → <code>code</code>
+    text = re.sub(r'`([^`]+)`', r'<code>\1</code>', text)
+
+    return text
+
+
 def format_problem_detail(question: dict) -> str:
     """Format full problem detail for HTML mode (avoids MarkdownV2 parsing issues)."""
     if not question:
@@ -529,10 +547,10 @@ def format_problem_detail(question: dict) -> str:
         clean_content = " ".join(clean_content.split())
         if len(clean_content) > 600:
             clean_content = clean_content[:600] + "…"
-        # In HTML mode, just escape and convert backticks to <code>
+        # Escape HTML special chars first
         escaped_content = _html_escape(clean_content)
-        # Convert backticks to HTML code tags
-        escaped_content = escaped_content.replace("`", "<code>").replace("`", "</code>")
+        # Then convert backticks to proper HTML code tags
+        escaped_content = _convert_backticks_to_html(escaped_content)
         lines.append(f"\n{escaped_content}")
 
     # Constraints: extract from HTML and format as bullet points
