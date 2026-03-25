@@ -603,6 +603,15 @@ def format_problem_detail(question: dict) -> str:
         escaped_content = _convert_backticks_to_html(escaped_content)
         lines.append(f"\n{escaped_content}")
 
+    # Examples: extract from <pre> blocks in content HTML
+    examples = extract_examples(content)
+    if examples:
+        for i, example in enumerate(examples[:3], 1):
+            lines.append(f"\n<b>Example {i}:</b>")
+            # In HTML mode, use <pre> for preformatted code (no escaping of = etc)
+            escaped_example = _html_escape(example)
+            lines.append(f"<pre>{escaped_example}</pre>")
+
     # Constraints: extract from HTML and format as bullet points
     constraints = extract_constraints(content)
     if constraints:
@@ -612,15 +621,6 @@ def format_problem_detail(question: dict) -> str:
             # Convert backticks to code tags for consistency
             escaped_constraint = _convert_backticks_to_html(escaped_constraint)
             lines.append(f"• {escaped_constraint}")
-
-    # Examples: extract from <pre> blocks in content HTML
-    examples = extract_examples(content)
-    if examples:
-        for i, example in enumerate(examples[:3], 1):
-            lines.append(f"\n<b>Example {i}:</b>")
-            # In HTML mode, use <pre> for preformatted code (no escaping of = etc)
-            escaped_example = _html_escape(example)
-            lines.append(f"<pre>{escaped_example}</pre>")
 
     # Hints: as spoilers (using Telegram's tg-spoiler tag)
     if hints and len(hints) > 0:
