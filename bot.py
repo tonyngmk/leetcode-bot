@@ -152,7 +152,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await update.message.reply_text(f"Problem '{slug}' not found.")
             return
         text = format_problem_detail(question)
-        await update.message.reply_text(text, parse_mode="MarkdownV2", disable_web_page_preview=True)
+        # format_problem_detail outputs HTML, not MarkdownV2
+        await update.message.reply_text(text, parse_mode="HTML", disable_web_page_preview=True)
         return
 
     # Normal /start → show help
