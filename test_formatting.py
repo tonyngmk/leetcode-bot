@@ -308,6 +308,30 @@ class TestHTMLCodeTags:
         for line in lines_with_hints:
             assert "<i>" not in line, "Hints should not use italic tags"
 
+    def test_description_excludes_examples_and_constraints(self):
+        """Description section should not include Example or Constraint headings."""
+        question = {
+            "questionFrontendId": "1",
+            "title": "Two Sum",
+            "titleSlug": "two-sum",
+            "difficulty": "Easy",
+            "content": '<p>Main description here.</p><p><strong>Example 1:</strong></p><pre>Input: test</pre><p><strong>Constraints:</strong></p><ul><li>constraint 1</li></ul>',
+            "likes": 0,
+            "dislikes": 0,
+            "topicTags": [],
+            "hints": [],
+            "isPaidOnly": False,
+        }
+        output = format_problem_detail(question)
+        # Split output into sections
+        desc_part = output.split('<b>Constraints:</b>')[0]
+        # Description should not contain Example or Constraint headers
+        assert "Example" not in desc_part, "Description should not include Example section"
+        assert "Constraint" not in desc_part, "Description should not include Constraint section"
+        # But these sections should exist elsewhere in output
+        assert "<b>Constraints:</b>" in output, "Constraints section should exist"
+        assert "Example" in output, "Example content should exist in dedicated section"
+
 
 class TestParseMode:
     """Test that output is compatible with Telegram parse modes."""
