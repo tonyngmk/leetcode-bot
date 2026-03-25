@@ -332,6 +332,28 @@ class TestHTMLCodeTags:
         assert "<b>Constraints:</b>" in output, "Constraints section should exist"
         assert "Example" in output, "Example content should exist in dedicated section"
 
+    def test_description_removes_assumption_text(self):
+        """Description should remove assumption and return instruction text."""
+        question = {
+            "questionFrontendId": "1",
+            "title": "Two Sum",
+            "titleSlug": "two-sum",
+            "difficulty": "Easy",
+            "content": '<p>Given an array, find two numbers.</p><p>You may assume each input has exactly one solution.</p><p>You can return the answer in any order.</p><p><strong>Example:</strong></p>',
+            "likes": 0,
+            "dislikes": 0,
+            "topicTags": [],
+            "hints": [],
+            "isPaidOnly": False,
+        }
+        output = format_problem_detail(question)
+        desc_part = output.split('<b>Example:')[0]
+        # Should not include assumption or return instruction text
+        assert "You may assume" not in desc_part, "Should remove assumption text"
+        assert "You can return" not in desc_part, "Should remove return instruction text"
+        # But core description should be present
+        assert "Given an array" in desc_part, "Core description should be present"
+
 
 class TestParseMode:
     """Test that output is compatible with Telegram parse modes."""

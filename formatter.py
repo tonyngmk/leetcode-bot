@@ -512,6 +512,56 @@ def _convert_backticks_to_html(text: str) -> str:
     return text
 
 
+def _clean_description_text(text: str) -> str:
+    """Remove constraint and example-like text from problem description.
+
+    Removes paragraphs/sentences that mention:
+    - Assumptions (You may assume, Note that)
+    - Return instructions (You can return, Return the)
+    - Examples (For example, Example:)
+    - Constraints prose
+    """
+    if not text:
+        return text
+
+    # Patterns that indicate constraint/example text to remove
+    skip_patterns = [
+        r'you\s+(may\s+assume|can\s+return)',
+        r'note\s+that',
+        r'for\s+example',
+        r'example\s*:',
+        r'constraints?:',
+        r'follow.up',
+        r'follow-up',
+        r'^input:',
+        r'^output:',
+        r'^explanation:',
+    ]
+
+    # Split by periods (handling cases with backticks)
+    sentences = re.split(r'(?<=[.!?])\s*', text)
+
+    filtered = []
+    for sent in sentences:
+        if not sent or not sent.strip():
+            continue
+        sent_lower = sent.lower()
+        # Keep only sentences that don't match skip patterns
+        if not any(re.search(pattern, sent_lower) for pattern in skip_patterns):
+            filtered.append(sent.strip())
+
+    # Join back with proper spacing
+    result = ' '.join(filtered)
+    # Clean up spacing around punctuation
+    result = re.sub(r'\s+([.!?])', r'\1', result)
+    result = result.strip()
+
+    if result and not result.endswith(('.', '!', '?')):
+        result += '.'
+
+    return result
+
+
 def format_problem_detail(question: dict) -> str:
     """Format full problem detail for HTML mode (avoids MarkdownV2 parsing issues)."""
     if not question:
@@ -543,7 +593,8 @@ def format_problem_detail(question: dict) -> str:
     description_html = extract_description(content)
     clean_content = _strip_html(description_html)
     if clean_content:
-        # Normalize whitespace but preserve paragraph breaks (multiple spaces indicate new paragraphs)
+        # Remove constraint/example-like text from description
+        clean_content = _clean_description_text(clean_content)
         clean_content = clean_content.strip()
         if len(clean_content) > 600:
             clean_content = clean_content[:600] + "…"
