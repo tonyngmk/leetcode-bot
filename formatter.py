@@ -589,13 +589,12 @@ def format_problem_detail(question: dict) -> str:
     # Engagement metrics
     lines.append(f"👍 {likes}  👎 {dislikes}")
 
-    # Description: extract only description part, then format
+    # Description: extract only the first paragraph (core problem statement)
     description_html = extract_description(content)
     clean_content = _strip_html(description_html)
     if clean_content:
-        # Remove constraint/example-like text from description
-        clean_content = _clean_description_text(clean_content)
         clean_content = clean_content.strip()
+        # Truncate if too long
         if len(clean_content) > 600:
             clean_content = clean_content[:600] + "…"
         # Escape HTML special chars first

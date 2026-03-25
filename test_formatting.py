@@ -332,8 +332,8 @@ class TestHTMLCodeTags:
         assert "<b>Constraints:</b>" in output, "Constraints section should exist"
         assert "Example" in output, "Example content should exist in dedicated section"
 
-    def test_description_removes_assumption_text(self):
-        """Description should remove assumption and return instruction text."""
+    def test_description_is_only_first_paragraph(self):
+        """Description should only contain the first paragraph, not additional explanations."""
         question = {
             "questionFrontendId": "1",
             "title": "Two Sum",
@@ -347,12 +347,14 @@ class TestHTMLCodeTags:
             "isPaidOnly": False,
         }
         output = format_problem_detail(question)
-        desc_part = output.split('<b>Example:')[0]
-        # Should not include assumption or return instruction text
-        assert "You may assume" not in desc_part, "Should remove assumption text"
-        assert "You can return" not in desc_part, "Should remove return instruction text"
-        # But core description should be present
-        assert "Given an array" in desc_part, "Core description should be present"
+        # Extract description part (between tags and constraints)
+        lines = output.split('\n')
+        desc_lines = [l for l in lines if 'Given an array' in l or ('numeric' in l.lower())]
+
+        # Verify only first paragraph is shown
+        assert "Given an array" in output, "First paragraph should be present"
+        assert "You may assume" not in output.split('<b>Constraints:')[0], "Should not include assumption text"
+        assert "You can return" not in output.split('<b>Constraints:')[0], "Should not include return text"
 
 
 class TestParseMode:

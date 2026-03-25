@@ -285,23 +285,18 @@ def extract_constraints(content: str) -> list[str]:
 
 
 def extract_description(content: str) -> str:
-    """Extract only the problem description, removing examples and constraints sections.
+    """Extract only the first paragraph as the core problem description.
 
-    LeetCode's content has: description → examples → constraints → follow-up.
-    We only want the description part (everything before Example/Constraint headings).
+    Takes only the first <p> tag to avoid including assumptions, constraints,
+    or other explanatory text that should be in dedicated sections.
     """
     if not content:
         return ""
-    # Stop at the first marker for Example, Constraint, or Follow-up
-    # This handles various HTML structures like <strong>Example, <p><strong>Example, etc.
-    match = re.search(
-        r'<(?:p>)?<strong>(?:Example|Constraint|Follow[\s\-]?up)',
-        content,
-        re.IGNORECASE
-    )
+    # Extract only the first <p>...</p> block - the core problem statement
+    match = re.search(r'<p>(.*?)</p>', content, re.DOTALL)
     if match:
-        content = content[:match.start()]
-    return content
+        return f"<p>{match.group(1)}</p>"
+    return ""
 
 
 def extract_examples(content: str) -> list[str]:
