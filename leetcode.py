@@ -263,6 +263,8 @@ def _strip_html(text: str) -> str:
 def extract_constraints(content: str) -> list[str]:
     """Extract constraint list items from HTML content."""
     constraints = []
+    if not content:
+        return constraints
     # Find <li> list items (typically within <ul> or <ol>)
     pattern = r'<li>(.*?)</li>'
     for match in re.finditer(pattern, content, re.DOTALL):

@@ -103,7 +103,7 @@ async def format_daily(
                 snapshot_diff_total = sum(snapshot_diff.values())
                 if snapshot_diff_total > len(subs):
                     overflow = snapshot_diff_total - len(subs)
-                    lines.append(f"  _\+{overflow} more not shown_")
+                    lines.append(f"  _\\+{overflow} more not shown_")
 
         lines.append("")
 
@@ -296,7 +296,7 @@ async def format_weekly(
             # Overflow note if snapshot diff shows more solved than captured in recent[]
             if compute_diff_total and compute_diff_total > len(subs):
                 overflow = compute_diff_total - len(subs)
-                lines.append(f"  _\+{overflow} more not shown_")
+                lines.append(f"  _\\+{overflow} more not shown_")
 
         lines.append("")
 
@@ -400,6 +400,7 @@ def _emoji_counts(counts: dict[str, int]) -> str:
 
 def _esc(text: str) -> str:
     """Escape MarkdownV2 special characters."""
+    text = text or ""  # Handle None gracefully
     special = r"_*[]()~`>#+-=|{}.!"
     out = []
     for ch in text:
@@ -408,6 +409,29 @@ def _esc(text: str) -> str:
         else:
             out.append(ch)
     return "".join(out)
+
+
+def _esc_preserve_code(text: str) -> str:
+    """Escape MarkdownV2 special characters but preserve backtick code formatting.
+
+    Backticks from _strip_html (e.g., `code` and ```code blocks```) are preserved
+    and not escaped so they render correctly as monospace in Telegram.
+    """
+    text = text or ""  # Handle None gracefully
+    # Temporarily replace backticks with placeholder
+    placeholder = "\x00CODE\x00"
+    # Preserve both inline code (single backticks) and code blocks (triple backticks)
+    text = text.replace("```", placeholder + "triple" + placeholder)
+    text = text.replace("`", placeholder + "single" + placeholder)
+
+    # Now escape everything else
+    text = _esc(text)
+
+    # Restore backticks
+    text = text.replace(placeholder + "triple" + placeholder, "```")
+    text = text.replace(placeholder + "single" + placeholder, "`")
+
+    return text
 
 
 def format_problems(result: dict, filters_desc: str, page: int = 0, page_size: int = 20, bot_username: Optional[str] = None) -> str:
@@ -484,14 +508,16 @@ def format_problem_detail(question: dict) -> str:
     # Engagement metrics
     lines.append(f"👍 {likes}  👎 {dislikes}")
 
-    # Description: strip HTML, don't escape (preserves backticks from _strip_html)
+    # Description: strip HTML and escape for MarkdownV2 (preserves backticks from _strip_html)
     clean_content = _strip_html(content)
     if clean_content:
         # Remove excessive line breaks and truncate if needed
         clean_content = " ".join(clean_content.split())  # Normalize whitespace
         if len(clean_content) > 600:
             clean_content = clean_content[:600] + "…"
-        lines.append(f"\n{clean_content}")
+        # Escape content but preserve backticks (code formatting from _strip_html)
+        escaped_content = _esc_preserve_code(clean_content)
+        lines.append(f"\n{escaped_content}")
 
     # Constraints: extract from HTML and format as bullet points
     constraints = extract_constraints(content)
@@ -505,8 +531,9 @@ def format_problem_detail(question: dict) -> str:
         examples_clean = _strip_html(examples)[:400]
         if examples_clean:
             lines.append("\n*Example:*")
-            # Prefix each line with > for blockquote format
-            quoted = "\n".join(f"> {line}" for line in examples_clean.split("\n"))
+            # Escape but preserve code backticks, then prefix with > for blockquote
+            escaped_examples = _esc_preserve_code(examples_clean)
+            quoted = "\n".join(f"> {line}" for line in escaped_examples.split("\n"))
             lines.append(quoted)
 
     # Hints: as spoiler text (||text||)
