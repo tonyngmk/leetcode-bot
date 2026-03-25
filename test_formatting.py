@@ -409,38 +409,38 @@ class TestImageExtraction:
     """Test image extraction from problem content."""
 
     def test_extract_single_image(self):
-        """Should extract a single image URL."""
-        content = '<p>Example</p><img src="https://example.com/image.png" />'
+        """Should extract a single image URL (jpeg by default)."""
+        content = '<p>Example</p><img src="https://example.com/image.jpeg" />'
         images = extract_images(content)
         assert len(images) == 1
-        assert images[0] == "https://example.com/image.png"
+        assert images[0] == "https://example.com/image.jpeg"
 
     def test_extract_multiple_images(self):
-        """Should extract multiple image URLs."""
+        """Should extract multiple image URLs (jpeg by default)."""
         content = '''
         <p>First image:</p>
-        <img src="https://example.com/image1.png" />
+        <img src="https://example.com/image1.jpeg" />
         <p>Second image:</p>
         <img src="https://example.com/image2.jpg" alt="test" />
         '''
         images = extract_images(content)
         assert len(images) == 2
-        assert "https://example.com/image1.png" in images
+        assert "https://example.com/image1.jpeg" in images
         assert "https://example.com/image2.jpg" in images
 
     def test_extract_images_with_attributes(self):
-        """Should extract images regardless of attribute order."""
-        content = '<img alt="test" width="100" src="https://example.com/image.png" class="problem-img" />'
+        """Should extract images regardless of attribute order (jpeg by default)."""
+        content = '<img alt="test" width="100" src="https://example.com/image.jpeg" class="problem-img" />'
         images = extract_images(content)
         assert len(images) == 1
-        assert images[0] == "https://example.com/image.png"
+        assert images[0] == "https://example.com/image.jpeg"
 
     def test_extract_images_case_insensitive(self):
-        """Should match img tags case-insensitively."""
-        content = '<IMG SRC="https://example.com/image.png" />'
+        """Should match img tags case-insensitively (jpeg by default)."""
+        content = '<IMG SRC="https://example.com/image.jpeg" />'
         images = extract_images(content)
         assert len(images) == 1
-        assert images[0] == "https://example.com/image.png"
+        assert images[0] == "https://example.com/image.jpeg"
 
     def test_extract_no_images(self):
         """Should return empty list when no images present."""
@@ -453,27 +453,30 @@ class TestImageExtraction:
         images = extract_images("")
         assert images == []
 
-    def test_format_problem_detail_includes_images(self):
-        """format_problem_detail should include extracted images."""
-        question = {
-            "questionFrontendId": "1",
-            "title": "Image Problem",
-            "titleSlug": "image-problem",
-            "difficulty": "Easy",
-            "content": '<p>Problem with image:</p><img src="https://example.com/diagram.png" />',
-            "likes": 0,
-            "dislikes": 0,
-            "topicTags": [],
-            "hints": [],
-            "exampleTestcases": "",
-            "isPaidOnly": False,
-        }
-        output = format_problem_detail(question)
-        # Should contain "Diagrams" section
-        assert "Diagrams" in output, "Should have Diagrams section"
-        # Should contain image link
-        assert "example.com/diagram.png" in output, "Should contain image URL"
-        assert "<a href=" in output, "Should have image links"
+    def test_extract_images_filters_by_type(self):
+        """Should filter images by type (default: jpeg and jpg)."""
+        content = '''
+        <img src="https://example.com/image.png" />
+        <img src="https://example.com/image.jpeg" />
+        <img src="https://example.com/image.jpg" />
+        '''
+        images = extract_images(content)  # Default: jpeg and jpg
+        assert len(images) == 2
+        assert any("jpeg" in url for url in images)
+        assert any("jpg" in url for url in images)
+
+    def test_extract_images_with_different_types(self):
+        """Should extract images of specified types."""
+        content = '''
+        <img src="https://example.com/image.png" />
+        <img src="https://example.com/image.jpeg" />
+        <img src="https://example.com/image.gif" />
+        '''
+        images = extract_images(content, image_types=["png", "jpeg"])
+        assert len(images) == 2
+        assert any("png" in url for url in images)
+        assert any("jpeg" in url for url in images)
+        assert not any("gif" in url for url in images)
 
 
 class TestEdgeCases:

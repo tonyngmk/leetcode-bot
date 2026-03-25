@@ -604,13 +604,6 @@ def format_problem_detail(question: dict) -> str:
         escaped_content = _convert_backticks_to_html(escaped_content)
         lines.append(f"\n{escaped_content}")
 
-    # Images: extract from content HTML
-    images = extract_images(content)
-    if images:
-        lines.append("\n<b>Diagrams:</b>")
-        for i, image_url in enumerate(images[:3], 1):
-            lines.append(f"<a href=\"{image_url}\">Image {i}</a>")
-
     # Examples: extract from <pre> blocks in content HTML
     examples = extract_examples(content)
     if examples:

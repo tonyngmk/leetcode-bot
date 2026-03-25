@@ -19,6 +19,7 @@ from formatter import (
     format_weekly,
 )
 from leetcode import (
+    extract_images,
     fetch_all_users,
     fetch_daily_challenge,
     fetch_problem,
@@ -154,6 +155,15 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         text = format_problem_detail(question)
         # format_problem_detail outputs HTML, not MarkdownV2
         await update.message.reply_text(text, parse_mode="HTML", disable_web_page_preview=True)
+
+        # Send problem images as separate photo messages
+        content = question.get("content", "")
+        images = extract_images(content)  # Filters to .jpeg by default
+        for image_url in images[:3]:  # Limit to 3 images
+            try:
+                await update.message.reply_photo(image_url)
+            except Exception as e:
+                logger.warning(f"Failed to send image {image_url}: {e}")
         return
 
     # Normal /start → show help
@@ -422,6 +432,15 @@ async def cmd_problem(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     text = format_problem_detail(question)
     await update.message.reply_text(text, parse_mode="HTML", disable_web_page_preview=True)
+
+    # Send problem images as separate photo messages
+    content = question.get("content", "")
+    images = extract_images(content)  # Filters to .jpeg by default
+    for image_url in images[:3]:  # Limit to 3 images
+        try:
+            await update.message.reply_photo(image_url)
+        except Exception as e:
+            logger.warning(f"Failed to send image {image_url}: {e}")
 
 
 async def cmd_challenge(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
