@@ -535,10 +535,9 @@ def format_problem_detail(question: dict) -> str:
     if examples:
         for i, example in enumerate(examples[:3], 1):
             lines.append(f"\n*Example {i}:*")
-            # Escape content for MarkdownV2 (= is reserved and must be escaped)
-            escaped_example = _esc_preserve_code(example)
-            # Use code block to preserve formatting and monospace style
-            lines.append(f"```\n{escaped_example}\n```")
+            # Inside code blocks (```...```), special characters don't need escaping in Telegram MarkdownV2
+            # Code blocks only require escaping of triple backticks if they appear in content
+            lines.append(f"```\n{example}\n```")
 
     # Hints: as spoiler text (||text||)
     if hints and len(hints) > 0:
