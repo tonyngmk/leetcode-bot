@@ -420,18 +420,20 @@ def _esc_preserve_code(text: str) -> str:
     and not escaped so they render correctly as monospace in Telegram.
     """
     text = text or ""  # Handle None gracefully
-    # Temporarily replace backticks with placeholder
-    placeholder = "\x00CODE\x00"
+    # Temporarily replace backticks with safe Unicode placeholders (not null bytes which break Telegram parser)
+    triple_placeholder = "\uFFF0TRIPLE\uFFF1"
+    single_placeholder = "\uFFF0SINGLE\uFFF1"
     # Preserve both inline code (single backticks) and code blocks (triple backticks)
-    text = text.replace("```", placeholder + "triple" + placeholder)
-    text = text.replace("`", placeholder + "single" + placeholder)
+    # Do triple first to avoid double-replacement
+    text = text.replace("```", triple_placeholder)
+    text = text.replace("`", single_placeholder)
 
     # Now escape everything else
     text = _esc(text)
 
     # Restore backticks
-    text = text.replace(placeholder + "triple" + placeholder, "```")
-    text = text.replace(placeholder + "single" + placeholder, "`")
+    text = text.replace(triple_placeholder, "```")
+    text = text.replace(single_placeholder, "`")
 
     return text
 
