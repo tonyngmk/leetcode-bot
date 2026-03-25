@@ -140,6 +140,26 @@ class TestFormatProblemDetail:
         # Code block backticks should be preserved in examples
         assert "```" in output, "Code block backticks should be present in output"
 
+    def test_format_problem_detail_with_equals_in_examples(self):
+        """Examples with = characters should escape them for MarkdownV2."""
+        question = {
+            "questionFrontendId": "1",
+            "title": "Two Sum",
+            "titleSlug": "two-sum",
+            "difficulty": "Easy",
+            "content": '<p>Test.</p><pre><strong>Input:</strong> nums = [2,7,11,15], target = 9\n<strong>Output:</strong> [0,1]</pre>',
+            "likes": 0,
+            "dislikes": 0,
+            "topicTags": [],
+            "hints": [],
+            "isPaidOnly": False,
+        }
+        output = format_problem_detail(question)
+        # = characters should be escaped as \= in output
+        assert "\\=" in output, "= characters in examples should be escaped for MarkdownV2"
+        # Code blocks should be present
+        assert "```" in output, "Examples should be in code blocks"
+
     def test_format_problem_detail_with_special_chars_in_hints(self):
         """Hints with special chars should be escaped."""
         question = {
