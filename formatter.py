@@ -432,7 +432,7 @@ def format_problems(result: dict, filters_desc: str) -> str:
         emoji = DIFFICULTY_EMOJI.get(difficulty, "")
         ac_rate = q.get("acRate", 0)
         tags = q.get("topicTags", [])
-        tags_str = " ".join(f"#{_esc(t['name'])}" for t in tags[:3])  # Limit to 3 tags
+        tags_str = " ".join(f"\\#{_esc(t['name'])}" for t in tags[:3])  # Limit to 3 tags
 
         ac_rate_str = _esc(f"{ac_rate:.1f}%") if ac_rate else "?%"
         line = f"{emoji} *{frontend_id}\\. [{title}](https://leetcode.com/problems/{slug}/) · {ac_rate_str}"
