@@ -620,7 +620,7 @@ def format_problem_detail(question: dict) -> str:
     hints = question.get("hints", [])
     is_paid = question.get("isPaidOnly", False)
 
-    lines = [f"{emoji} <b>{frontend_id}. {title}</b> <code>{slug}</code>"]
+    lines = [f"{emoji} <b>{frontend_id}. {title}</b> · <code>{slug}</code>"]
 
     # Tags
     if tags:
