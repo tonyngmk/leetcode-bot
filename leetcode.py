@@ -300,16 +300,22 @@ def extract_description(content: str) -> str:
 
 
 def extract_examples(content: str) -> list[str]:
-    """Extract formatted examples from <pre> blocks in content HTML.
+    """Extract formatted examples from content HTML.
 
-    LeetCode's content field contains <pre> blocks with:
-      Input: nums = [2,7,11,15], target = 9
-      Output: [0,1]
-      Explanation: Because nums[0] + nums[1] == 9, we return [0, 1].
+    Handles two formats:
+    1. <pre> blocks (traditional format):
+       <pre><strong>Input:</strong> nums = [2,7,11,15]
+       <strong>Output:</strong> [0,1]</pre>
+
+    2. <p> tag format (when images are present):
+       <p><strong>Input:</strong> grid = [[1,4],[2,3]]</p>
+       <p><strong>Output:</strong> true</p>
     """
     if not content:
         return []
     examples = []
+
+    # First try: extract from <pre> blocks (traditional format)
     pattern = r'<pre>(.*?)</pre>'
     for match in re.finditer(pattern, content, re.DOTALL):
         pre_content = match.group(1)
@@ -326,6 +332,50 @@ def extract_examples(content: str) -> list[str]:
         pre_content = '\n'.join(line for line in lines if line)
         if pre_content:
             examples.append(pre_content)
+
+    # Second try: extract from <p> tags (format used when images are present)
+    # Look for "Example N:" followed by Input/Output/Explanation in <p> tags
+    if not examples:
+        # Match "Example N:" or "Example:" header
+        example_pattern = r'<p><strong>Example \d*:?</strong></p>'
+        matches = list(re.finditer(example_pattern, content, re.IGNORECASE))
+
+        for match_idx, match in enumerate(matches):
+            start_pos = match.end()
+            # Find the end position: either the next Example or a non-example section
+            if match_idx + 1 < len(matches):
+                end_pos = matches[match_idx + 1].start()
+            else:
+                # For last example, look for Constraints section or end of content
+                constraints_match = re.search(r'<p><strong>Constraints', content[start_pos:], re.IGNORECASE)
+                if constraints_match:
+                    end_pos = start_pos + constraints_match.start()
+                else:
+                    end_pos = len(content)
+
+            example_section = content[start_pos:end_pos]
+
+            # Extract Input, Output, Explanation from <p> tags
+            # Pattern: <p><strong>Input:</strong> ...</p> or <p>Input: ...</p>
+            example_lines = []
+            p_pattern = r'<p>(.*?)</p>'
+            for p_match in re.finditer(p_pattern, example_section, re.DOTALL):
+                p_content = p_match.group(1)
+                # Unwrap tags
+                p_content = re.sub(r'<strong>(.*?)</strong>', r'\1', p_content)
+                p_content = re.sub(r'<sup>(.*?)</sup>', r'^\1', p_content)
+                p_content = re.sub(r'<[^>]+>', '', p_content)
+                p_content = html.unescape(p_content)
+                p_content = p_content.strip()
+
+                # Only include lines that start with Input, Output, Explanation, etc
+                if any(p_content.startswith(prefix) for prefix in ['Input', 'Output', 'Explanation', 'Constraints']):
+                    if not p_content.startswith('Constraints'):  # Stop at constraints
+                        example_lines.append(p_content)
+
+            if example_lines:
+                examples.append('\n'.join(example_lines))
+
     return examples
 
 

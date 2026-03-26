@@ -19,7 +19,7 @@ from formatter import (
     format_leaderboard,
     format_daily_challenge,
 )
-from leetcode import extract_images, map_images_to_examples
+from leetcode import extract_images, map_images_to_examples, extract_examples
 
 
 # MarkdownV2 reserved characters that must be escaped: _*[]()~`>#+-=|{}.!
@@ -609,6 +609,83 @@ class TestFormatDailyChallenge:
         """Empty challenge should return error message."""
         output = format_daily_challenge({})
         assert "Failed" in output, "Should return error message for empty challenge"
+
+
+class TestExampleExtraction:
+    """Test example extraction for both <pre> and <p> tag formats."""
+
+    def test_extract_examples_from_pre_tags(self):
+        """Should extract examples from <pre> blocks (traditional format)."""
+        content = '''
+        <p>Description</p>
+        <p><strong>Example 1:</strong></p>
+        <pre><strong>Input:</strong> nums = [2,7,11,15], target = 9
+<strong>Output:</strong> [0,1]</pre>
+        '''
+        examples = extract_examples(content)
+        assert len(examples) == 1
+        assert "Input: nums = [2,7,11,15]" in examples[0]
+        assert "Output: [0,1]" in examples[0]
+
+    def test_extract_examples_from_p_tags_with_images(self):
+        """Should extract examples from <p> tags (format used with images)."""
+        content = '''
+        <p>Description</p>
+        <img src="https://example.com/image.jpeg" />
+        <p><strong>Example 1:</strong></p>
+        <p><strong>Input:</strong> grid = [[1,4],[2,3]]</p>
+        <p><strong>Output:</strong> true</p>
+        <p><strong>Explanation:</strong> Some explanation here</p>
+        '''
+        examples = extract_examples(content)
+        assert len(examples) == 1
+        assert "Input: grid = [[1,4],[2,3]]" in examples[0]
+        assert "Output: true" in examples[0]
+        assert "Explanation: Some explanation here" in examples[0]
+
+    def test_extract_multiple_examples_from_p_tags(self):
+        """Should extract multiple examples from <p> tags."""
+        content = '''
+        <p><strong>Example 1:</strong></p>
+        <p><strong>Input:</strong> x = 3</p>
+        <p><strong>Output:</strong> 9</p>
+        <p><strong>Example 2:</strong></p>
+        <p><strong>Input:</strong> x = -2</p>
+        <p><strong>Output:</strong> 4</p>
+        '''
+        examples = extract_examples(content)
+        assert len(examples) == 2
+        assert "Input: x = 3" in examples[0]
+        assert "Output: 9" in examples[0]
+        assert "Input: x = -2" in examples[1]
+        assert "Output: 4" in examples[1]
+
+    def test_extract_examples_stops_at_constraints(self):
+        """Should stop extracting examples at Constraints section."""
+        content = '''
+        <p><strong>Example 1:</strong></p>
+        <p><strong>Input:</strong> x = 3</p>
+        <p><strong>Output:</strong> 9</p>
+        <p><strong>Constraints:</strong></p>
+        <p>Some constraint</p>
+        '''
+        examples = extract_examples(content)
+        assert len(examples) == 1
+        assert "Constraints" not in examples[0]
+
+    def test_extract_examples_with_images_interspersed(self):
+        """Should extract examples even with images interspersed."""
+        content = '''
+        <p><strong>Example 1:</strong></p>
+        <img src="img1.jpeg" />
+        <p><strong>Input:</strong> grid = [[1,4],[2,3]]</p>
+        <img src="img2.jpeg" />
+        <p><strong>Output:</strong> true</p>
+        '''
+        examples = extract_examples(content)
+        assert len(examples) == 1
+        assert "Input: grid = [[1,4],[2,3]]" in examples[0]
+        assert "Output: true" in examples[0]
 
 
 class TestEdgeCases:
