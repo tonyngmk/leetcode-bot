@@ -270,13 +270,17 @@ def _strip_html(text: str) -> str:
     return text
 
 
-def extract_constraints(content: str) -> list[str]:
+def extract_constraints(content: str, preserve_html: bool = False) -> list[str]:
     """Extract constraint list items from after the 'Constraints:' section header.
 
     Looks for the 'Constraints:' section and extracts only <li> items from that
     section onwards, stopping at the next major section (Follow-up, Notes, etc).
     This avoids including method signatures or implementation requirements that
     appear before the constraints.
+
+    Args:
+        content: Raw HTML content from LeetCode API.
+        preserve_html: If True, return raw HTML instead of stripping tags.
     """
     constraints = []
     if not content:
@@ -305,10 +309,14 @@ def extract_constraints(content: str) -> list[str]:
     pattern = r'<li>(.*?)</li>'
     for match in re.finditer(pattern, constraints_section, re.DOTALL):
         constraint_html = match.group(1)
-        # Strip HTML from constraint text
-        constraint = _strip_html(constraint_html)
-        if constraint:
-            constraints.append(constraint)
+        if preserve_html:
+            if constraint_html.strip():
+                constraints.append(constraint_html)
+        else:
+            # Strip HTML from constraint text
+            constraint = _strip_html(constraint_html)
+            if constraint:
+                constraints.append(constraint)
 
     return constraints
 

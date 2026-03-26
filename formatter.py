@@ -1,3 +1,4 @@
+import html
 import re
 from datetime import datetime
 from typing import Optional
@@ -532,6 +533,154 @@ def _convert_backticks_to_html(text: str) -> str:
     return text
 
 
+def _convert_leetcode_html_to_telegram(html_text: str) -> str:
+    """Convert LeetCode HTML to Telegram-compatible HTML, preserving formatting.
+
+    Converts: <strong>→<b>, <em>→<i>, <code>, <ul>/<li>→bullets, <p>→newlines.
+    Strips all other HTML tags, then escapes bare &, <, > not part of Telegram tags.
+    """
+    if not html_text:
+        return ""
+
+    text = html_text
+
+    # 1. Convert <sup> to ^n notation (e.g. 10<sup>4</sup> → 10^4)
+    text = re.sub(r'<sup>(.*?)</sup>', r'^\1', text, flags=re.DOTALL)
+
+    # 2. Convert code blocks: <pre><code>...</code></pre> → <pre>...</pre>
+    text = re.sub(r'<pre><code>(.*?)</code></pre>', r'<pre>\1</pre>', text, flags=re.DOTALL)
+
+    # 3. Convert formatting tags to Telegram equivalents
+    text = re.sub(r'<strong[^>]*>', '<b>', text)
+    text = text.replace('</strong>', '</b>')
+    text = re.sub(r'<em[^>]*>', '<i>', text)
+    text = text.replace('</em>', '</i>')
+
+    # 4. Convert bullet lists: <ul>/<li> → • prefixed lines
+    text = re.sub(r'</?ul[^>]*>', '', text)
+    text = re.sub(r'</?ol[^>]*>', '', text)
+    text = re.sub(r'<li[^>]*>', '\n• ', text)
+    text = text.replace('</li>', '')
+
+    # 5. Convert paragraphs to single newlines
+    text = re.sub(r'<p[^>]*>', '\n', text)
+    text = text.replace('</p>', '')
+
+    # 6. Convert <br> variants to newline
+    text = re.sub(r'<br\s*/?>', '\n', text)
+
+    # 7. Temporarily protect Telegram-safe tags with placeholders
+    safe_tags = {}
+    counter = 0
+    safe_tag_patterns = [
+        r'<pre>(.*?)</pre>',
+        r'<code>(.*?)</code>',
+        r'<b>(.*?)</b>',
+        r'<i>(.*?)</i>',
+    ]
+    for pattern in safe_tag_patterns:
+        for match in re.finditer(pattern, text, re.DOTALL):
+            placeholder = f"\uFFF0TG_TAG_{counter}\uFFF1"
+            safe_tags[placeholder] = match.group(0)
+            text = text.replace(match.group(0), placeholder, 1)
+            counter += 1
+
+    # 8. Strip all remaining HTML tags (now safe — Telegram tags are placeholders)
+    text = re.sub(r'<[^>]+>', '', text)
+
+    # 9. Unescape HTML entities (&lt; → <, etc.)
+    text = html.unescape(text)
+
+    # 10. Escape bare &, <, > for Telegram HTML mode
+    text = _html_escape(text)
+
+    # 11. Restore Telegram-safe tags (iterate until all nested placeholders resolved)
+    # Do NOT html.unescape() the tag content — entities like &lt; must stay escaped
+    # in Telegram HTML mode even inside <code>/<pre> tags.
+    max_iterations = 10
+    for _ in range(max_iterations):
+        replaced = False
+        for placeholder, tag in safe_tags.items():
+            if placeholder in text:
+                text = text.replace(placeholder, tag)
+                replaced = True
+        if not replaced:
+            break
+
+    # 12. Convert backtick pairs to code tags (for any backtick-style code in source)
+    text = re.sub(r'```(.*?)```', r'<pre>\1</pre>', text, flags=re.DOTALL)
+    text = re.sub(r'`([^`]+)`', r'<code>\1</code>', text)
+
+    # 13. Normalize whitespace: collapse 3+ newlines to 2, strip leading/trailing
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    text = text.strip()
+
+    return text
+
+
+def _truncate_by_visible_length(html_text: str, max_len: int) -> str:
+    """Truncate HTML text by visible character count, properly closing open tags."""
+    if not html_text:
+        return html_text
+
+    visible_count = 0
+    i = 0
+    open_tags = []
+    in_tag = False
+    current_tag = ""
+
+    while i < len(html_text):
+        ch = html_text[i]
+
+        if ch == '<':
+            in_tag = True
+            current_tag = ""
+            i += 1
+            continue
+
+        if in_tag:
+            if ch == '>':
+                in_tag = False
+                tag_content = current_tag.strip()
+                # Track open/close tags
+                if tag_content.startswith('/'):
+                    tag_name = tag_content[1:].strip().lower()
+                    if open_tags and open_tags[-1] == tag_name:
+                        open_tags.pop()
+                elif not tag_content.endswith('/'):
+                    tag_name = re.split(r'\s', tag_content)[0].lower()
+                    if tag_name in ('b', 'i', 'code', 'pre'):
+                        open_tags.append(tag_name)
+            else:
+                current_tag += ch
+            i += 1
+            continue
+
+        # Count visible character (handle HTML entities as single char)
+        if ch == '&':
+            entity_match = re.match(r'&[a-zA-Z]+;|&#\d+;', html_text[i:])
+            if entity_match:
+                visible_count += 1
+                if visible_count > max_len:
+                    result = html_text[:i] + "…"
+                    for tag in reversed(open_tags):
+                        result += f"</{tag}>"
+                    return result
+                i += len(entity_match.group(0))
+                continue
+
+        visible_count += 1
+        if visible_count > max_len:
+            result = html_text[:i] + "…"
+            for tag in reversed(open_tags):
+                result += f"</{tag}>"
+            return result
+
+        i += 1
+
+    return html_text
+
+
 def _esc_preserve_html_tags(text: str) -> str:
     """Escape HTML special characters but preserve safe HTML tags like <code>.
 
@@ -649,37 +798,28 @@ def format_problem_detail(question: dict) -> str:
     # Engagement metrics
     lines.append(f"👍 {likes}  👎 {dislikes}")
 
-    # Description: extract only the first paragraph (core problem statement)
+    # Description: extract paragraphs and convert to Telegram HTML (preserving formatting)
     description_html = extract_description(content)
-    clean_content = _strip_html(description_html)
-    if clean_content:
-        clean_content = clean_content.strip()
-        # Truncate if too long
-        if len(clean_content) > 600:
-            clean_content = clean_content[:600] + "…"
-        # Escape HTML special chars first
-        escaped_content = _html_escape(clean_content)
-        # Then convert backticks to proper HTML code tags
-        escaped_content = _convert_backticks_to_html(escaped_content)
-        lines.append(f"\n{escaped_content}")
+    if description_html:
+        telegram_desc = _convert_leetcode_html_to_telegram(description_html)
+        if telegram_desc.strip():
+            telegram_desc = _truncate_by_visible_length(telegram_desc, 600)
+            lines.append(f"\n{telegram_desc}")
 
     # Examples: extract from <pre> blocks or <p> tags in content HTML
     examples = extract_examples(content)
     if examples:
         for i, example in enumerate(examples[:3], 1):
             lines.append(f"\n<b>Example {i}:</b>")
-            # In HTML mode, use <pre> for preformatted code (no escaping of = etc)
             escaped_example = _html_escape(example)
-            lines.append(f"<pre>{escaped_example}</pre>")
+            lines.append(f"<blockquote>{escaped_example}</blockquote>")
 
-    # Constraints: extract from HTML and format as bullet points
-    constraints = extract_constraints(content)
-    if constraints:
+    # Constraints: extract from HTML and format as bullet points with rich formatting
+    constraints_html = extract_constraints(content, preserve_html=True)
+    if constraints_html:
         lines.append("\n<b>Constraints:</b>")
-        for constraint in constraints[:5]:
-            escaped_constraint = _html_escape(constraint)
-            # Convert backticks to code tags for consistency
-            escaped_constraint = _convert_backticks_to_html(escaped_constraint)
+        for constraint in constraints_html[:5]:
+            escaped_constraint = _convert_leetcode_html_to_telegram(constraint)
             lines.append(f"• {escaped_constraint}")
 
     # Hints: as individual spoilers (using Telegram's tg-spoiler tag)

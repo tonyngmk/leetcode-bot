@@ -9,10 +9,13 @@ This test suite validates that:
 """
 
 import pytest
+import re
+
 from formatter import (
     _esc,
     _esc_preserve_code,
     _esc_preserve_html_tags,
+    _convert_leetcode_html_to_telegram,
     format_problems,
     format_problem_detail,
     format_daily,
@@ -212,7 +215,7 @@ class TestFormatProblemDetail:
         assert "Given an array" in output, "Content should be present"
 
     def test_format_problem_detail_with_code_blocks(self):
-        """Code blocks in examples should use HTML <pre> tags."""
+        """Code blocks in examples should use HTML <blockquote> tags."""
         question = {
             "questionFrontendId": "1",
             "title": "Test",
@@ -226,8 +229,8 @@ class TestFormatProblemDetail:
             "isPaidOnly": False,
         }
         output = format_problem_detail(question)
-        # HTML mode uses <pre> tags instead of markdown backticks
-        assert "<pre>" in output, "Code blocks should use HTML <pre> tags"
+        # HTML mode uses <blockquote> tags for quote-style examples
+        assert "<blockquote>" in output, "Code blocks should use HTML <blockquote> tags"
         assert "arr = [1, 2]" in output, "Code content should be present"
 
     def test_format_problem_detail_with_equals_in_examples(self):
@@ -246,7 +249,7 @@ class TestFormatProblemDetail:
         }
         output = format_problem_detail(question)
         # HTML mode: no MarkdownV2 escaping needed
-        assert "<pre>" in output, "Examples should use <pre> tags"
+        assert "<blockquote>" in output, "Examples should use <blockquote> tags"
         assert "nums = [2,7,11,15]" in output, "Example content with equals should be present"
         # Description should not include the example content
         assert "Given two numbers" in output, "Description should be present"
@@ -510,10 +513,10 @@ class TestParseMode:
             "isPaidOnly": False,
         }
         output = format_problem_detail(question)
-        # HTML mode: equals should appear unescaped in <pre> blocks
+        # HTML mode: equals should appear unescaped in <blockquote> blocks
         assert "nums = [1,2]" in output, "Equals should be present unescaped in examples"
-        # Code blocks should use HTML <pre> tags
-        assert "<pre>" in output, "Code blocks should use <pre> tags"
+        # Code blocks should use HTML <blockquote> tags
+        assert "<blockquote>" in output, "Code blocks should use <blockquote> tags"
         # No MarkdownV2 escaping
         assert output.count("\\=") == 0, "HTML mode should not have backslash-escaped equals"
         # No null bytes that could break parser
@@ -933,6 +936,252 @@ class TestEdgeCases:
         output = format_problem_detail(question)
         # Should not be excessively long
         assert len(output) < 5000, "Output should be truncated"
+
+
+class TestRichFormatting:
+    """Test that rich HTML formatting is preserved in problem descriptions."""
+
+    def _make_question(self, content):
+        return {
+            "questionFrontendId": "1",
+            "title": "Test",
+            "titleSlug": "test",
+            "difficulty": "Easy",
+            "content": content,
+            "likes": 0,
+            "dislikes": 0,
+            "topicTags": [],
+            "hints": [],
+            "isPaidOnly": False,
+        }
+
+    def test_description_preserves_bold(self):
+        """<strong> in description should become <b> in output."""
+        q = self._make_question("<p>Given a <strong>sorted</strong> array.</p>")
+        output = format_problem_detail(q)
+        assert "<b>sorted</b>" in output
+
+    def test_description_preserves_italic(self):
+        """<em> in description should become <i> in output."""
+        q = self._make_question("<p>Return the <em>minimum</em> value.</p>")
+        output = format_problem_detail(q)
+        assert "<i>minimum</i>" in output
+
+    def test_description_preserves_inline_code(self):
+        """<code> in description should be preserved."""
+        q = self._make_question("<p>Use <code>nums[i]</code> to access elements.</p>")
+        output = format_problem_detail(q)
+        assert "<code>nums[i]</code>" in output
+
+    def test_description_bullet_lists(self):
+        """<ul><li> inside <p> should become bullet points."""
+        # Bullet lists in the description area (inside paragraph context)
+        q = self._make_question("<p>Rules:<ul><li>First rule</li><li>Second rule</li></ul></p>")
+        output = format_problem_detail(q)
+        assert "• First rule" in output
+        assert "• Second rule" in output
+
+    def test_description_superscripts(self):
+        """<sup> should become ^n notation."""
+        q = self._make_question("<p>The value is 10<sup>4</sup>.</p>")
+        output = format_problem_detail(q)
+        assert "10^4" in output
+
+    def test_description_paragraphs_separated(self):
+        """Paragraphs should be separated, not concatenated."""
+        q = self._make_question("<p>First paragraph.</p><p>Second paragraph.</p>")
+        output = format_problem_detail(q)
+        assert "First paragraph." in output
+        assert "Second paragraph." in output
+        # Should not have 3+ newlines in a row
+        import re
+        assert not re.search(r'\n{3,}', output), "Should not have excessive newlines"
+
+    def test_description_escapes_bare_angle_brackets(self):
+        """Bare < and > from math comparisons should be escaped."""
+        q = self._make_question("<p>Check if a &lt; b and c &gt; d.</p>")
+        output = format_problem_detail(q)
+        assert "&lt;" in output
+        assert "&gt;" in output
+        # Should not contain raw < or > outside of HTML tags
+        import re
+        text_only = re.sub(r'<[^>]+>', '', output)
+        assert "<" not in text_only or ">" not in text_only  # entities should be escaped
+
+    def test_constraints_preserve_code_tags(self):
+        """Constraints with <code> should render with code tags."""
+        content = (
+            "<p>Description.</p>"
+            "<p><strong>Constraints:</strong></p>"
+            "<ul><li><code>1</code> &lt;= nums.length &lt;= <code>10<sup>4</sup></code></li></ul>"
+        )
+        q = self._make_question(content)
+        output = format_problem_detail(q)
+        assert "<code>1</code>" in output
+        assert "10^4" in output
+
+    def test_truncation_respects_visible_length(self):
+        """Truncation should count visible chars, not HTML tags."""
+        # Create content with lots of bold tags but short visible text
+        inner = "<b>x</b>" * 100  # 100 visible chars, much more in HTML
+        q = self._make_question(f"<p>{inner}</p>")
+        output = format_problem_detail(q)
+        # Should NOT be truncated since visible text is only 100 chars
+        assert "…" not in output
+
+    def test_truncation_closes_open_tags(self):
+        """Truncation mid-tag should properly close the tag."""
+        long_text = "a" * 700
+        q = self._make_question(f"<p><b>{long_text}</b></p>")
+        output = format_problem_detail(q)
+        assert "…" in output
+        # The <b> tag should be properly closed
+        assert output.count("<b>") == output.count("</b>")
+
+
+class TestTelegramHTMLSafety:
+    """Regression tests ensuring output never contains bare < > & outside HTML tags.
+
+    These prevent Telegram BadRequest errors like:
+    'Can't parse entities: unsupported start tag "=" at byte offset N'
+    which occur when &lt;= gets unescaped to <= in the output.
+    """
+
+    # Valid Telegram HTML tags that are allowed in output
+    TELEGRAM_TAG_RE = re.compile(
+        r'</?(?:b|i|u|s|code|pre|a|tg-spoiler|blockquote)(?:\s[^>]*)?>',
+    )
+
+    def _assert_no_bare_angles(self, output: str, msg: str = ""):
+        """Assert that no bare < or > exist outside of valid Telegram HTML tags."""
+        # Remove all valid Telegram tags
+        stripped = self.TELEGRAM_TAG_RE.sub('', output)
+        # Check for leftover < or > (these would cause Telegram parse errors)
+        bare_lt = [m for m in re.finditer(r'<', stripped)]
+        bare_gt = [m for m in re.finditer(r'>', stripped)]
+        if bare_lt:
+            # Show context around the bare <
+            for m in bare_lt:
+                ctx_start = max(0, m.start() - 30)
+                ctx_end = min(len(stripped), m.end() + 30)
+                context = stripped[ctx_start:ctx_end]
+                assert False, f"Bare '<' found{' - ' + msg if msg else ''}: ...{context}..."
+        if bare_gt:
+            for m in bare_gt:
+                ctx_start = max(0, m.start() - 30)
+                ctx_end = min(len(stripped), m.end() + 30)
+                context = stripped[ctx_start:ctx_end]
+                assert False, f"Bare '>' found{' - ' + msg if msg else ''}: ...{context}..."
+
+    def _make_question(self, content, **kwargs):
+        base = {
+            "questionFrontendId": "1",
+            "title": "Test Problem",
+            "titleSlug": "test-problem",
+            "difficulty": "Medium",
+            "content": content,
+            "likes": 100,
+            "dislikes": 10,
+            "topicTags": [{"name": "Array", "slug": "array"}],
+            "hints": [],
+            "isPaidOnly": False,
+        }
+        base.update(kwargs)
+        return base
+
+    def test_lte_gte_in_constraints_outside_code(self):
+        """&lt;= between <code> tags in constraints must stay escaped."""
+        content = (
+            "<p>Find the target.</p>"
+            "<p><strong>Constraints:</strong></p>"
+            "<ul>"
+            "<li><code>2</code> &lt;= nums.length &lt;= <code>10<sup>4</sup></code></li>"
+            "<li><code>-10<sup>9</sup></code> &lt;= nums[i] &lt;= <code>10<sup>9</sup></code></li>"
+            "</ul>"
+        )
+        output = format_problem_detail(self._make_question(content))
+        self._assert_no_bare_angles(output, "constraints with <= between code tags")
+        assert "&lt;=" in output
+
+    def test_lte_gte_inside_code_tags(self):
+        """&lt;= inside <code> tags must stay escaped (not unescaped by html.unescape)."""
+        content = (
+            "<p>Find the target.</p>"
+            "<p><strong>Constraints:</strong></p>"
+            "<ul>"
+            "<li><code>2 &lt;= nums.length &lt;= 10<sup>4</sup></code></li>"
+            "<li><code>-10<sup>9</sup> &lt;= nums[i] &lt;= 10<sup>9</sup></code></li>"
+            "</ul>"
+        )
+        output = format_problem_detail(self._make_question(content))
+        self._assert_no_bare_angles(output, "<=/>= inside code tags")
+
+    def test_lte_in_description(self):
+        """&lt;= in description text must be escaped."""
+        content = "<p>Return true if a &lt;= b and c &gt;= d.</p>"
+        output = format_problem_detail(self._make_question(content))
+        self._assert_no_bare_angles(output, "<= in description")
+
+    def test_nested_code_inside_italic_with_entities(self):
+        """Nested <code> inside <em> with entities must not leak bare <."""
+        content = "<p>Return <em>the <code>k</code>-th value where k &lt;= n</em>.</p>"
+        output = format_problem_detail(self._make_question(content))
+        self._assert_no_bare_angles(output, "nested code inside italic with entities")
+
+    def test_ampersand_in_description(self):
+        """Bare & in text must be escaped as &amp;."""
+        content = "<p>Use divide &amp; conquer.</p>"
+        output = format_problem_detail(self._make_question(content))
+        self._assert_no_bare_angles(output)
+        # & should be escaped
+        stripped = self.TELEGRAM_TAG_RE.sub('', output)
+        assert '&amp;' in stripped or '&' not in re.sub(r'&(?:amp|lt|gt|quot);', '', stripped)
+
+    def test_realistic_two_sum_full_content(self):
+        """Full Two Sum-style content must produce safe Telegram HTML."""
+        content = (
+            '<p>Given an array of integers <code>nums</code> and an integer <code>target</code>, '
+            'return <em>indices of the two numbers such that they add up to <code>target</code></em>.</p>\n'
+            '<p><strong class="example">Example 1:</strong></p>\n'
+            '<pre><strong>Input:</strong> nums = [2,7,11,15], target = 9\n'
+            '<strong>Output:</strong> [0,1]\n'
+            '<strong>Explanation:</strong> Because nums[0] + nums[1] == 9, we return [0, 1].</pre>\n'
+            '<p><strong>Constraints:</strong></p>\n'
+            '<ul>\n'
+            '<li><code>2 &lt;= nums.length &lt;= 10<sup>4</sup></code></li>\n'
+            '<li><code>-10<sup>9</sup> &lt;= nums[i] &lt;= 10<sup>9</sup></code></li>\n'
+            '<li><code>-10<sup>9</sup> &lt;= target &lt;= 10<sup>9</sup></code></li>\n'
+            '<li>Only one valid answer exists.</li>\n'
+            '</ul>'
+        )
+        output = format_problem_detail(self._make_question(content))
+        self._assert_no_bare_angles(output, "full Two Sum content")
+
+    def test_hints_with_code_and_entities(self):
+        """Hints with <code> and entities must be safe."""
+        content = "<p>Description.</p>"
+        hints = [
+            'Use a hashmap where <code>key &lt; value</code>.',
+            'Check if <code>nums[i] + nums[j] &lt;= target</code>.',
+        ]
+        output = format_problem_detail(self._make_question(content, hints=hints))
+        self._assert_no_bare_angles(output, "hints with code and entities")
+
+    def test_convert_leetcode_html_to_telegram_entities_in_code(self):
+        """Direct test: _convert_leetcode_html_to_telegram must not unescape entities in tags."""
+        result = _convert_leetcode_html_to_telegram(
+            '<code>2 &lt;= n &lt;= 10<sup>5</sup></code>'
+        )
+        self._assert_no_bare_angles(result, "direct converter test")
+        assert '<code>' in result
+        assert '&lt;=' in result
+
+    def test_convert_leetcode_html_to_telegram_mixed_entities(self):
+        """Entities both inside and outside tags must all be properly handled."""
+        result = _convert_leetcode_html_to_telegram(
+            '<p>If a &lt; b then <code>a &lt; b</code> is true &amp; valid.</p>'
+        )
+        self._assert_no_bare_angles(result, "mixed entities inside/outside tags")
 
 
 if __name__ == "__main__":
