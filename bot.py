@@ -52,6 +52,22 @@ def _tz(chat_id: str) -> ZoneInfo:
     return ZoneInfo(storage.get_timezone(chat_id))
 
 
+async def _send_problem_images(update: Update, content: str) -> None:
+    """Send problem images as separate photo messages with example captions."""
+    images = extract_images(content)  # Filters to .jpeg by default
+    image_mapping = map_images_to_examples(content)  # Map images to example numbers
+    for image_url in images[:3]:  # Limit to 3 images
+        try:
+            example_num = image_mapping.get(image_url)
+            if example_num:
+                caption = f"Example {example_num}"
+            else:
+                caption = None
+            await update.message.reply_photo(image_url, caption=caption)
+        except Exception as e:
+            logger.warning(f"Failed to send image {image_url}: {e}")
+
+
 async def _take_initial_snapshots(chat_id: str, usernames: list[str]) -> None:
     """Take snapshots for all users."""
     tz = _tz(chat_id)
@@ -157,20 +173,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         # format_problem_detail outputs HTML, not MarkdownV2
         await update.message.reply_text(text, parse_mode="HTML", disable_web_page_preview=True)
 
-        # Send problem images as separate photo messages with captions
         content = question.get("content", "")
-        images = extract_images(content)  # Filters to .jpeg by default
-        image_mapping = map_images_to_examples(content)  # Map images to example numbers
-        for image_url in images[:3]:  # Limit to 3 images
-            try:
-                example_num = image_mapping.get(image_url)
-                if example_num:
-                    caption = f"Example {example_num}"
-                else:
-                    caption = None
-                await update.message.reply_photo(image_url, caption=caption)
-            except Exception as e:
-                logger.warning(f"Failed to send image {image_url}: {e}")
+        await _send_problem_images(update, content)
         return
 
     # Normal /start → show help
@@ -440,20 +444,8 @@ async def cmd_problem(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     text = format_problem_detail(question)
     await update.message.reply_text(text, parse_mode="HTML", disable_web_page_preview=True)
 
-    # Send problem images as separate photo messages with captions
     content = question.get("content", "")
-    images = extract_images(content)  # Filters to .jpeg by default
-    image_mapping = map_images_to_examples(content)  # Map images to example numbers
-    for image_url in images[:3]:  # Limit to 3 images
-        try:
-            example_num = image_mapping.get(image_url)
-            if example_num:
-                caption = f"Example {example_num}"
-            else:
-                caption = None
-            await update.message.reply_photo(image_url, caption=caption)
-        except Exception as e:
-            logger.warning(f"Failed to send image {image_url}: {e}")
+    await _send_problem_images(update, content)
 
 
 async def cmd_challenge(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -464,6 +456,10 @@ async def cmd_challenge(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     text = format_daily_challenge(challenge)
     await update.message.reply_text(text, parse_mode="HTML", disable_web_page_preview=True)
+
+    question = challenge.get("question", {})
+    content = question.get("content", "")
+    await _send_problem_images(update, content)
 
 
 # --- Startup ---
