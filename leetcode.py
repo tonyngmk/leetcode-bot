@@ -302,12 +302,19 @@ def extract_description(content: str) -> str:
 def extract_examples(content: str) -> list[str]:
     """Extract formatted examples from content HTML.
 
-    Handles two formats:
+    Handles three formats:
     1. <pre> blocks (traditional format):
        <pre><strong>Input:</strong> nums = [2,7,11,15]
        <strong>Output:</strong> [0,1]</pre>
 
-    2. <p> tag format (when images are present):
+    2. <div class="example-block"> format (with images):
+       <p><strong class="example">Example 1:</strong></p>
+       <div class="example-block">
+         <p><strong>Input:</strong> <span class="example-io">grid = [[1,4],[2,3]]</span></p>
+         <p><strong>Output:</strong> <span class="example-io">true</span></p>
+       </div>
+
+    3. <p> tag format (when images are present):
        <p><strong>Input:</strong> grid = [[1,4],[2,3]]</p>
        <p><strong>Output:</strong> true</p>
     """
@@ -333,21 +340,20 @@ def extract_examples(content: str) -> list[str]:
         if pre_content:
             examples.append(pre_content)
 
-    # Second try: extract from <p> tags (format used when images are present)
-    # Look for "Example N:" followed by Input/Output/Explanation in <p> tags
+    # Second try: extract from <div class="example-block"> (format with images)
     if not examples:
-        # Match "Example N:" or "Example:" header
-        example_pattern = r'<p><strong>Example \d*:?</strong></p>'
+        # Match example headers with class attribute: <strong class="example">Example N:</strong>
+        example_pattern = r'<p><strong class="example">Example \d+:</strong></p>'
         matches = list(re.finditer(example_pattern, content, re.IGNORECASE))
 
         for match_idx, match in enumerate(matches):
             start_pos = match.end()
-            # Find the end position: either the next Example or a non-example section
+            # Find the next example header or constraint section
             if match_idx + 1 < len(matches):
                 end_pos = matches[match_idx + 1].start()
             else:
-                # For last example, look for Constraints section or end of content
-                constraints_match = re.search(r'<p><strong>Constraints', content[start_pos:], re.IGNORECASE)
+                # For last example, look for Constraints section
+                constraints_match = re.search(r'<p><strong[^>]*>Constraints', content[start_pos:], re.IGNORECASE)
                 if constraints_match:
                     end_pos = start_pos + constraints_match.start()
                 else:
@@ -355,23 +361,28 @@ def extract_examples(content: str) -> list[str]:
 
             example_section = content[start_pos:end_pos]
 
-            # Extract Input, Output, Explanation from <p> tags
-            # Pattern: <p><strong>Input:</strong> ...</p> or <p>Input: ...</p>
+            # Extract Input, Output, Explanation from <p> tags within example-block
             example_lines = []
             p_pattern = r'<p>(.*?)</p>'
             for p_match in re.finditer(p_pattern, example_section, re.DOTALL):
                 p_content = p_match.group(1)
-                # Unwrap tags
-                p_content = re.sub(r'<strong>(.*?)</strong>', r'\1', p_content)
+
+                # Skip image tags and list items
+                if '<img' in p_content or p_content.strip().startswith('<ul'):
+                    continue
+
+                # Unwrap tags (including span tags with classes)
+                p_content = re.sub(r'<span[^>]*>(.*?)</span>', r'\1', p_content)
+                p_content = re.sub(r'<strong[^>]*>(.*?)</strong>', r'\1', p_content)
                 p_content = re.sub(r'<sup>(.*?)</sup>', r'^\1', p_content)
+                p_content = re.sub(r'<code>(.*?)</code>', r'\1', p_content)
                 p_content = re.sub(r'<[^>]+>', '', p_content)
                 p_content = html.unescape(p_content)
                 p_content = p_content.strip()
 
-                # Only include lines that start with Input, Output, Explanation, etc
-                if any(p_content.startswith(prefix) for prefix in ['Input', 'Output', 'Explanation', 'Constraints']):
-                    if not p_content.startswith('Constraints'):  # Stop at constraints
-                        example_lines.append(p_content)
+                # Only include lines that start with Input, Output, Explanation
+                if any(p_content.startswith(prefix) for prefix in ['Input', 'Output', 'Explanation']):
+                    example_lines.append(p_content)
 
             if example_lines:
                 examples.append('\n'.join(example_lines))

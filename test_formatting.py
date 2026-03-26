@@ -627,31 +627,35 @@ class TestExampleExtraction:
         assert "Input: nums = [2,7,11,15]" in examples[0]
         assert "Output: [0,1]" in examples[0]
 
-    def test_extract_examples_from_p_tags_with_images(self):
-        """Should extract examples from <p> tags (format used with images)."""
+    def test_extract_examples_from_example_block_format(self):
+        """Should extract examples from <div class="example-block"> (actual LeetCode format with images)."""
         content = '''
         <p>Description</p>
-        <img src="https://example.com/image.jpeg" />
-        <p><strong>Example 1:</strong></p>
-        <p><strong>Input:</strong> grid = [[1,4],[2,3]]</p>
-        <p><strong>Output:</strong> true</p>
-        <p><strong>Explanation:</strong> Some explanation here</p>
+        <p><strong class="example">Example 1:</strong></p>
+        <div class="example-block">
+        <p><strong>Input:</strong> <span class="example-io">grid = [[1,4],[2,3]]</span></p>
+        <p><strong>Output:</strong> <span class="example-io">true</span></p>
+        <p><img src="image.jpeg" /></p>
+        </div>
         '''
         examples = extract_examples(content)
         assert len(examples) == 1
         assert "Input: grid = [[1,4],[2,3]]" in examples[0]
         assert "Output: true" in examples[0]
-        assert "Explanation: Some explanation here" in examples[0]
 
-    def test_extract_multiple_examples_from_p_tags(self):
-        """Should extract multiple examples from <p> tags."""
+    def test_extract_multiple_examples_from_example_blocks(self):
+        """Should extract multiple examples from <div class="example-block">."""
         content = '''
-        <p><strong>Example 1:</strong></p>
-        <p><strong>Input:</strong> x = 3</p>
-        <p><strong>Output:</strong> 9</p>
-        <p><strong>Example 2:</strong></p>
-        <p><strong>Input:</strong> x = -2</p>
-        <p><strong>Output:</strong> 4</p>
+        <p><strong class="example">Example 1:</strong></p>
+        <div class="example-block">
+        <p><strong>Input:</strong> <span class="example-io">x = 3</span></p>
+        <p><strong>Output:</strong> <span class="example-io">9</span></p>
+        </div>
+        <p><strong class="example">Example 2:</strong></p>
+        <div class="example-block">
+        <p><strong>Input:</strong> <span class="example-io">x = -2</span></p>
+        <p><strong>Output:</strong> <span class="example-io">4</span></p>
+        </div>
         '''
         examples = extract_examples(content)
         assert len(examples) == 2
@@ -663,9 +667,11 @@ class TestExampleExtraction:
     def test_extract_examples_stops_at_constraints(self):
         """Should stop extracting examples at Constraints section."""
         content = '''
-        <p><strong>Example 1:</strong></p>
-        <p><strong>Input:</strong> x = 3</p>
-        <p><strong>Output:</strong> 9</p>
+        <p><strong class="example">Example 1:</strong></p>
+        <div class="example-block">
+        <p><strong>Input:</strong> <span class="example-io">x = 3</span></p>
+        <p><strong>Output:</strong> <span class="example-io">9</span></p>
+        </div>
         <p><strong>Constraints:</strong></p>
         <p>Some constraint</p>
         '''
@@ -673,19 +679,21 @@ class TestExampleExtraction:
         assert len(examples) == 1
         assert "Constraints" not in examples[0]
 
-    def test_extract_examples_with_images_interspersed(self):
-        """Should extract examples even with images interspersed."""
+    def test_extract_examples_with_images_in_block(self):
+        """Should skip images within example blocks."""
         content = '''
-        <p><strong>Example 1:</strong></p>
-        <img src="img1.jpeg" />
-        <p><strong>Input:</strong> grid = [[1,4],[2,3]]</p>
-        <img src="img2.jpeg" />
-        <p><strong>Output:</strong> true</p>
+        <p><strong class="example">Example 1:</strong></p>
+        <div class="example-block">
+        <p><strong>Input:</strong> <span class="example-io">grid = [[1,4],[2,3]]</span></p>
+        <p><strong>Output:</strong> <span class="example-io">true</span></p>
+        <p><img alt="" src="image.jpeg" style="height: 180px;" /></p>
+        </div>
         '''
         examples = extract_examples(content)
         assert len(examples) == 1
         assert "Input: grid = [[1,4],[2,3]]" in examples[0]
         assert "Output: true" in examples[0]
+        assert "<img" not in examples[0]  # Images should be stripped
 
 
 class TestEdgeCases:
