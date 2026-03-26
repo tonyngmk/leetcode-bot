@@ -623,14 +623,14 @@ def format_problem_detail(question: dict) -> str:
             escaped_constraint = _convert_backticks_to_html(escaped_constraint)
             lines.append(f"• {escaped_constraint}")
 
-    # Hints: as spoilers (using Telegram's tg-spoiler tag)
+    # Hints: as individual spoilers (using Telegram's tg-spoiler tag)
     if hints and len(hints) > 0:
         lines.append("\n<b>Hints:</b>")
         for hint in hints[:3]:
             escaped_hint = _html_escape(hint)
             # Convert backticks to code tags
             escaped_hint = _convert_backticks_to_html(escaped_hint)
-            lines.append(f"<tg-spoiler>{escaped_hint}</tg-spoiler>")
+            lines.append(f"• <tg-spoiler>{escaped_hint}</tg-spoiler>")
 
     # Premium badge
     if is_paid:
