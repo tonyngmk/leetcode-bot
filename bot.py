@@ -13,7 +13,6 @@ from formatter import (
     _esc,
     format_daily,
     format_daily_challenge,
-    format_hint_spoiler,
     format_leaderboard,
     format_problem_detail,
     format_problems,
@@ -67,20 +66,6 @@ async def _send_problem_images(update: Update, content: str) -> None:
             await update.message.reply_photo(image_url, caption=caption)
         except Exception as e:
             logger.warning(f"Failed to send image {image_url}: {e}")
-
-
-async def _send_problem_hints(update: Update, hints: list[str]) -> None:
-    """Send problem hints as individual separate messages (each is an independent spoiler)."""
-    if not hints:
-        return
-
-    await update.message.reply_text("<b>Hints:</b>", parse_mode="HTML")
-    for hint in hints[:3]:  # Limit to 3 hints
-        try:
-            text = format_hint_spoiler(hint)
-            await update.message.reply_text(text, parse_mode="HTML")
-        except Exception as e:
-            logger.warning(f"Failed to send hint: {e}")
 
 
 async def _take_initial_snapshots(chat_id: str, usernames: list[str]) -> None:
@@ -190,9 +175,6 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
         content = question.get("content", "")
         await _send_problem_images(update, content)
-
-        hints = question.get("hints", [])
-        await _send_problem_hints(update, hints)
         return
 
     # Normal /start → show help
@@ -465,9 +447,6 @@ async def cmd_problem(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     content = question.get("content", "")
     await _send_problem_images(update, content)
 
-    hints = question.get("hints", [])
-    await _send_problem_hints(update, hints)
-
 
 async def cmd_challenge(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     challenge = await fetch_daily_challenge()
@@ -481,9 +460,6 @@ async def cmd_challenge(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     question = challenge.get("question", {})
     content = question.get("content", "")
     await _send_problem_images(update, content)
-
-    hints = question.get("hints", [])
-    await _send_problem_hints(update, hints)
 
 
 # --- Startup ---

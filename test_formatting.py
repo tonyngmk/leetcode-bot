@@ -14,7 +14,6 @@ from formatter import (
     _esc_preserve_code,
     format_problems,
     format_problem_detail,
-    format_hint_spoiler,
     format_daily,
     format_weekly,
     format_leaderboard,
@@ -169,16 +168,24 @@ class TestFormatProblemDetail:
         assert output.count("\\=") == 0, "HTML mode should not have backslash escapes"
 
     def test_format_problem_detail_with_special_chars_in_hints(self):
-        """Hints with special chars should be properly HTML escaped via format_hint_spoiler."""
-        # Test that format_hint_spoiler properly escapes special chars
-        hint1 = format_hint_spoiler("Hint 1. Use a loop!")
-        hint2 = format_hint_spoiler("Hint 2: Sort the array.")
-
-        # Should use spoiler tags
-        assert "<tg-spoiler>" in hint1, "Hint 1 should use spoiler tag"
-        assert "<tg-spoiler>" in hint2, "Hint 2 should use spoiler tag"
-        assert "Hint 1" in hint1, "Hint 1 text should be present"
-        assert "Hint 2" in hint2, "Hint 2 text should be present"
+        """Hints with special chars should be properly HTML escaped."""
+        question = {
+            "questionFrontendId": "1",
+            "title": "Test",
+            "titleSlug": "test",
+            "difficulty": "Easy",
+            "content": "<p>Test.</p>",
+            "likes": 0,
+            "dislikes": 0,
+            "topicTags": [],
+            "hints": ["Hint 1. Use a loop!", "Hint 2: Sort the array."],
+            "exampleTestcases": "",
+            "isPaidOnly": False,
+        }
+        output = format_problem_detail(question)
+        # Hints should be present using HTML formatting
+        assert "<b>Hints:</b>" in output, "Hints section should be present"
+        assert "Hint" in output, "Hint text should be present"
 
     def test_format_problem_detail_with_all_special_chars(self):
         """Test that all special chars in content are handled in HTML mode."""
@@ -281,20 +288,27 @@ class TestHTMLCodeTags:
         assert output.count("<pre>") == output.count("</pre>"), "<pre> tags should match"
 
     def test_hints_use_spoiler_tags(self):
-        """Hints should use Telegram spoiler formatting via format_hint_spoiler."""
-        # Test that format_hint_spoiler uses spoiler tags correctly
-        hint1_output = format_hint_spoiler("Hint 1")
-        hint2_output = format_hint_spoiler("Hint 2")
-
-        # Should use spoiler tags
-        assert "<tg-spoiler>" in hint1_output, "Hint 1 should use spoiler tags"
-        assert "<tg-spoiler>" in hint2_output, "Hint 2 should use spoiler tags"
-        assert "</tg-spoiler>" in hint1_output, "Hint 1 should close spoiler tags"
-        assert "Hint 1" in hint1_output, "Hint 1 text should be present"
-        assert "Hint 2" in hint2_output, "Hint 2 text should be present"
+        """Hints should use Telegram spoiler formatting, not italics."""
+        question = {
+            "questionFrontendId": "1",
+            "title": "Test",
+            "titleSlug": "test",
+            "difficulty": "Easy",
+            "content": "<p>Test.</p>",
+            "likes": 0,
+            "dislikes": 0,
+            "topicTags": [],
+            "hints": ["Hint 1", "Hint 2"],
+            "isPaidOnly": False,
+        }
+        output = format_problem_detail(question)
+        # Should use spoiler tags, not italics
+        assert "<tg-spoiler>" in output, "Hints should use spoiler tags"
+        assert "Hint 1" in output, "Hint text should be present"
         # Should not use italic tags for hints
-        assert "<i>" not in hint1_output, "Hints should not use italic tags"
-        assert "<i>" not in hint2_output, "Hints should not use italic tags"
+        lines_with_hints = [l for l in output.split('\n') if 'Hint' in l]
+        for line in lines_with_hints:
+            assert "<i>" not in line, "Hints should not use italic tags"
 
     def test_description_excludes_examples_and_constraints(self):
         """Description section should not include Example or Constraint explanations."""

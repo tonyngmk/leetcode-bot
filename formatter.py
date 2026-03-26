@@ -564,10 +564,7 @@ def _clean_description_text(text: str) -> str:
 
 
 def format_problem_detail(question: dict) -> str:
-    """Format full problem detail for HTML mode (avoids MarkdownV2 parsing issues).
-
-    Note: Hints are excluded and should be sent separately via format_hint_spoiler().
-    """
+    """Format full problem detail for HTML mode (avoids MarkdownV2 parsing issues)."""
     if not question:
         return "Problem not found."
 
@@ -580,6 +577,7 @@ def format_problem_detail(question: dict) -> str:
     likes = question.get("likes", 0)
     dislikes = question.get("dislikes", 0)
     tags = question.get("topicTags", [])
+    hints = question.get("hints", [])
     is_paid = question.get("isPaidOnly", False)
 
     lines = [f"{emoji} <b>{frontend_id}. {title}</b> <code>{slug}</code>"]
@@ -625,6 +623,15 @@ def format_problem_detail(question: dict) -> str:
             escaped_constraint = _convert_backticks_to_html(escaped_constraint)
             lines.append(f"• {escaped_constraint}")
 
+    # Hints: as individual spoilers (using Telegram's tg-spoiler tag)
+    if hints and len(hints) > 0:
+        lines.append("\n<b>Hints:</b>")
+        for hint in hints[:3]:
+            escaped_hint = _html_escape(hint)
+            # Convert backticks to code tags
+            escaped_hint = _convert_backticks_to_html(escaped_hint)
+            lines.append(f"• <tg-spoiler>{escaped_hint}</tg-spoiler>")
+
     # Premium badge
     if is_paid:
         lines.append("\n⚠️ <i>Premium only</i>")
@@ -633,13 +640,6 @@ def format_problem_detail(question: dict) -> str:
     lines.append(f"\n<a href=\"https://leetcode.com/problems/{slug}/\">Open on LeetCode</a>")
 
     return "\n".join(lines)
-
-
-def format_hint_spoiler(hint: str) -> str:
-    """Format a single hint as an individual spoiler for sending as a separate message."""
-    escaped_hint = _html_escape(hint)
-    escaped_hint = _convert_backticks_to_html(escaped_hint)
-    return f"<tg-spoiler>{escaped_hint}</tg-spoiler>"
 
 
 def format_daily_challenge(challenge: dict) -> str:
