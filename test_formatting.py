@@ -12,18 +12,27 @@ import pytest
 import re
 
 from formatter import (
+    LANGUAGE_DISPLAY,
     _esc,
     _esc_preserve_code,
     _esc_preserve_html_tags,
     _convert_leetcode_html_to_telegram,
     format_problems,
     format_problem_detail,
+    format_solution_detail,
     format_daily,
     format_weekly,
     format_leaderboard,
     format_daily_challenge,
 )
-from leetcode import extract_images, map_images_to_examples, extract_examples, extract_constraints
+from leetcode import (
+    extract_images,
+    map_images_to_examples,
+    extract_examples,
+    extract_constraints,
+    get_cached_solution,
+    save_solution,
+)
 
 
 # MarkdownV2 reserved characters that must be escaped: _*[]()~`>#+-=|{}.!
@@ -1182,6 +1191,165 @@ class TestTelegramHTMLSafety:
             '<p>If a &lt; b then <code>a &lt; b</code> is true &amp; valid.</p>'
         )
         self._assert_no_bare_angles(result, "mixed entities inside/outside tags")
+
+
+class TestFormatSolutionDetail:
+    """Test format_solution_detail output."""
+
+    SAMPLE_APPROACH = {
+        "name": "Hash Map",
+        "explanation": "Use a hash map to store complements as we iterate.",
+        "time_complexity": "O(n)",
+        "space_complexity": "O(n)",
+        "code": {
+            "python": "class Solution:\n    def twoSum(self, nums, target):\n        seen = {}\n        for i, num in enumerate(nums):\n            if target - num in seen:\n                return [seen[target - num], i]\n            seen[num] = i",
+            "java": "class Solution {\n    public int[] twoSum(int[] nums, int target) {\n        Map<Integer, Integer> seen = new HashMap<>();\n        for (int i = 0; i < nums.length; i++) {\n            int c = target - nums[i];\n            if (seen.containsKey(c)) return new int[]{seen.get(c), i};\n            seen.put(nums[i], i);\n        }\n        return new int[]{};\n    }\n}",
+        },
+    }
+
+    def test_basic_formatting(self):
+        """Solution detail should contain approach name, code, and complexity."""
+        output = format_solution_detail("two-sum", self.SAMPLE_APPROACH, "python")
+        assert "Hash Map" in output
+        assert "two-sum" in output
+        assert "Python" in output
+        assert "O(n)" in output
+        assert "class Solution:" in output
+
+    def test_java_language(self):
+        """Should render Java code when language is java."""
+        output = format_solution_detail("two-sum", self.SAMPLE_APPROACH, "java")
+        assert "Java" in output
+        assert "HashMap" in output
+
+    def test_missing_language_code(self):
+        """Should still format even if requested language has no code."""
+        output = format_solution_detail("two-sum", self.SAMPLE_APPROACH, "go")
+        assert "Hash Map" in output
+        # No code block since go isn't in this approach
+        assert "<pre>" not in output
+
+    def test_html_safety_in_code(self):
+        """Angle brackets in code should be HTML-escaped."""
+        approach = {
+            "name": "Comparison",
+            "explanation": "Compare values.",
+            "time_complexity": "O(1)",
+            "space_complexity": "O(1)",
+            "code": {"python": "if a < b and c > d:\n    return True"},
+        }
+        output = format_solution_detail("test-problem", approach, "python")
+        assert "&lt;" in output
+        assert "&gt;" in output
+        # No raw < or > outside HTML tags in the code block
+        import re
+        code_match = re.search(r'<pre><code>(.*?)</code></pre>', output, re.DOTALL)
+        if code_match:
+            code_content = code_match.group(1)
+            assert "<" not in code_content.replace("&lt;", "").replace("&gt;", "")
+
+    def test_explanation_html_escaped(self):
+        """Special chars in explanation should be escaped."""
+        approach = {
+            "name": "Test",
+            "explanation": "Check if x < y & return true",
+            "time_complexity": "O(1)",
+            "space_complexity": "O(1)",
+            "code": {"python": "pass"},
+        }
+        output = format_solution_detail("test", approach, "python")
+        assert "&lt;" in output
+        assert "&amp;" in output
+
+    def test_empty_approach(self):
+        """Empty approach should not crash."""
+        output = format_solution_detail("test", {}, "python")
+        assert "Unknown" in output
+
+    def test_leetcode_link(self):
+        """Should include link to LeetCode problem."""
+        output = format_solution_detail("two-sum", self.SAMPLE_APPROACH, "python")
+        assert "https://leetcode.com/problems/two-sum/" in output
+
+
+class TestSolutionCache:
+    """Test solution cache get/save functions."""
+
+    def test_get_nonexistent_solution(self):
+        """Getting a non-cached slug should return None."""
+        result = get_cached_solution("nonexistent-problem-xyz-999")
+        assert result is None
+
+    def test_save_and_get_solution(self, tmp_path, monkeypatch):
+        """Saving a solution should make it retrievable."""
+        import leetcode
+        cache_file = tmp_path / "test_solution_cache.json"
+        monkeypatch.setattr(leetcode, "SOLUTION_CACHE_FILE", str(cache_file))
+        # Reset cache state
+        monkeypatch.setattr(leetcode, "_solution_cache", {})
+        monkeypatch.setattr(leetcode, "_solution_cache_loaded", False)
+
+        test_data = {"approaches": [{"name": "Test", "code": {"python": "pass"}}]}
+        save_solution("test-slug", test_data)
+
+        # Reset and reload from disk
+        monkeypatch.setattr(leetcode, "_solution_cache", {})
+        monkeypatch.setattr(leetcode, "_solution_cache_loaded", False)
+
+        result = get_cached_solution("test-slug")
+        assert result is not None
+        assert result["approaches"][0]["name"] == "Test"
+
+
+class TestSolutionKeyboard:
+    """Test solution keyboard encode/decode helpers."""
+
+    def test_encode_decode_roundtrip(self):
+        from bot import _encode_solution_callback, _decode_solution_callback
+        encoded = _encode_solution_callback("two-sum", 1, "python")
+        slug, idx, lang = _decode_solution_callback(encoded)
+        assert slug == "two-sum"
+        assert idx == 1
+        assert lang == "python"
+
+    def test_encode_stays_within_64_bytes(self):
+        from bot import _encode_solution_callback
+        # Very long slug
+        long_slug = "a-very-long-problem-slug-that-might-exceed-the-limit"
+        encoded = _encode_solution_callback(long_slug, 0, "javascript")
+        assert len(encoded.encode()) <= 64
+
+    def test_build_keyboard_single_approach(self):
+        from bot import _build_solution_keyboard
+        approaches = [{"name": "Hash Map", "code": {"python": "...", "java": "..."}}]
+        keyboard = _build_solution_keyboard("two-sum", approaches, 0, "python")
+        # Single approach: no approach row, only language row
+        assert len(keyboard.inline_keyboard) == 1
+        lang_row = keyboard.inline_keyboard[0]
+        assert len(lang_row) == 2  # python, java
+
+    def test_build_keyboard_multiple_approaches(self):
+        from bot import _build_solution_keyboard
+        approaches = [
+            {"name": "Brute Force", "code": {"python": "..."}},
+            {"name": "Hash Map", "code": {"python": "...", "java": "..."}},
+        ]
+        keyboard = _build_solution_keyboard("two-sum", approaches, 1, "python")
+        # Two rows: approaches + languages
+        assert len(keyboard.inline_keyboard) == 2
+        approach_row = keyboard.inline_keyboard[0]
+        assert len(approach_row) == 2
+        # Second approach should have checkmark
+        assert "✓" in approach_row[1].text
+        assert "✓" not in approach_row[0].text
+
+    def test_build_keyboard_selected_language(self):
+        from bot import _build_solution_keyboard
+        approaches = [{"name": "Test", "code": {"python": "...", "java": "...", "go": "..."}}]
+        keyboard = _build_solution_keyboard("slug", approaches, 0, "java")
+        lang_row = keyboard.inline_keyboard[0]
+        java_btn = [b for b in lang_row if "Java" in b.text][0]
+        assert "✓" in java_btn.text
 
 
 if __name__ == "__main__":

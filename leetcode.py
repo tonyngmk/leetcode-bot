@@ -1,6 +1,8 @@
 import asyncio
 import html
+import json
 import logging
+import os
 import re
 from datetime import datetime, timedelta, time
 from typing import Optional
@@ -13,14 +15,103 @@ from config import (
     DAILY_CHALLENGE_QUERY,
     FETCH_DELAY_SECONDS,
     LEETCODE_GRAPHQL_URL,
+    PROBLEM_CACHE_FILE,
     PROBLEM_DETAIL_QUERY,
     PROBLEMS_QUERY,
+    SOLUTION_CACHE_FILE,
     USER_PROFILE_QUERY,
 )
 
 DIFFICULTY_EMOJI = {"Easy": "\U0001f7e2", "Medium": "\U0001f7e0", "Hard": "\U0001f534"}
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Problem cache – in-memory dict backed by problem_cache.json
+# ---------------------------------------------------------------------------
+_problem_cache: dict[str, dict] = {}
+_cache_loaded: bool = False
+
+
+def _load_problem_cache() -> None:
+    """Load problem cache from disk into memory (once)."""
+    global _problem_cache, _cache_loaded
+    if _cache_loaded:
+        return
+    if os.path.exists(PROBLEM_CACHE_FILE):
+        try:
+            with open(PROBLEM_CACHE_FILE) as f:
+                _problem_cache = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            logger.exception("Failed to load problem cache")
+            _problem_cache = {}
+    _cache_loaded = True
+
+
+def _save_problem_cache() -> None:
+    """Persist the in-memory cache to disk."""
+    try:
+        with open(PROBLEM_CACHE_FILE, "w") as f:
+            json.dump(_problem_cache, f, separators=(",", ":"))
+    except OSError:
+        logger.exception("Failed to save problem cache")
+
+
+def _get_cached_problem(slug: str) -> Optional[dict]:
+    """Return cached problem or None."""
+    _load_problem_cache()
+    return _problem_cache.get(slug)
+
+
+def _cache_problem(slug: str, data: dict) -> None:
+    """Store problem in cache and persist."""
+    _load_problem_cache()
+    _problem_cache[slug] = data
+    _save_problem_cache()
+
+
+# ---------------------------------------------------------------------------
+# Solution cache – in-memory dict backed by solution_cache.json
+# ---------------------------------------------------------------------------
+_solution_cache: dict[str, dict] = {}
+_solution_cache_loaded: bool = False
+
+
+def _load_solution_cache() -> None:
+    """Load solution cache from disk into memory (once)."""
+    global _solution_cache, _solution_cache_loaded
+    if _solution_cache_loaded:
+        return
+    if os.path.exists(SOLUTION_CACHE_FILE):
+        try:
+            with open(SOLUTION_CACHE_FILE) as f:
+                _solution_cache = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            logger.exception("Failed to load solution cache")
+            _solution_cache = {}
+    _solution_cache_loaded = True
+
+
+def _save_solution_cache() -> None:
+    """Persist the solution cache to disk."""
+    try:
+        with open(SOLUTION_CACHE_FILE, "w") as f:
+            json.dump(_solution_cache, f, separators=(",", ":"))
+    except OSError:
+        logger.exception("Failed to save solution cache")
+
+
+def get_cached_solution(slug: str) -> Optional[dict]:
+    """Return cached solution data for a slug, or None."""
+    _load_solution_cache()
+    return _solution_cache.get(slug)
+
+
+def save_solution(slug: str, data: dict) -> None:
+    """Store solution in cache and persist."""
+    _load_solution_cache()
+    _solution_cache[slug] = data
+    _save_solution_cache()
 
 
 def _parse_ac_counts(ac_submission_num: list[dict]) -> dict[str, int]:
@@ -578,20 +669,31 @@ async def fetch_problems(
 
 
 async def fetch_problem(slug: str) -> Optional[dict]:
-    """Fetch full detail for a single problem by slug."""
+    """Fetch full detail for a single problem by slug, using local cache."""
+    normalized = slug.lower().replace(" ", "-")
+
+    cached = _get_cached_problem(normalized)
+    if cached is not None:
+        return cached
+
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.post(
                 LEETCODE_GRAPHQL_URL,
-                json={"query": PROBLEM_DETAIL_QUERY, "variables": {"titleSlug": slug.lower().replace(" ", "-")}},
+                json={"query": PROBLEM_DETAIL_QUERY, "variables": {"titleSlug": normalized}},
                 headers={"Content-Type": "application/json", "Referer": "https://leetcode.com"},
             )
             resp.raise_for_status()
             data = resp.json().get("data", {})
-            return data.get("question")
+            question = data.get("question")
     except Exception:
         logger.exception("Failed to fetch problem %s", slug)
         return None
+
+    if question is not None:
+        _cache_problem(normalized, question)
+
+    return question
 
 
 async def fetch_daily_challenge() -> Optional[dict]:

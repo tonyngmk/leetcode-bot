@@ -3,3 +3,5 @@ state.json
 __pycache__/
 *.pyc
 .venv/
+problem_cache.json
+solution_cache.json

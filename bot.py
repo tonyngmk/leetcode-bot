@@ -10,12 +10,14 @@ from telegram.ext import Application, CallbackQueryHandler, CommandHandler, Cont
 import storage
 from config import BOT_TOKEN, VALID_INTERVALS
 from formatter import (
+    LANGUAGE_DISPLAY,
     _esc,
     format_daily,
     format_daily_challenge,
     format_leaderboard,
     format_problem_detail,
     format_problems,
+    format_solution_detail,
     format_weekly,
 )
 from leetcode import (
@@ -25,6 +27,7 @@ from leetcode import (
     fetch_problem,
     fetch_problems,
     fetch_user_profile,
+    get_cached_solution,
     map_images_to_examples,
     take_snapshot,
 )
@@ -197,6 +200,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "  Examples: /problems  /problems easy  /problems easy array\n"
         "  Multi\\-word tags: /problems \"dynamic programming\" easy\n"
         "/problem \\<slug\\> \\- Problem details \\(e\\.g\\. /problem two\\-sum\\)\n"
+        "/solution \\<slug\\> \\- View solution \\(e\\.g\\. /solution two\\-sum\\)\n"
         "/challenge \\- Today's daily challenge\n\n"
         "/help \\- Show this message"
     )
@@ -448,6 +452,115 @@ async def cmd_problem(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await _send_problem_images(update, content)
 
 
+# ---------------------------------------------------------------------------
+# /solution command with inline keyboard navigation
+# ---------------------------------------------------------------------------
+
+def _encode_solution_callback(slug: str, approach_idx: int, lang: str) -> str:
+    """Encode solution nav state: `s:<slug>:<idx>:<lang>` (≤64 bytes)."""
+    payload = f"s:{slug}:{approach_idx}:{lang}"
+    # Truncate slug if needed to stay within 64-byte limit
+    while len(payload.encode()) > 64:
+        slug = slug[:-1]
+        payload = f"s:{slug}:{approach_idx}:{lang}"
+    return payload
+
+
+def _decode_solution_callback(data: str) -> tuple:
+    """Parse callback: (slug, approach_idx, lang)."""
+    parts = data.split(":", 3)
+    return parts[1], int(parts[2]), parts[3]
+
+
+def _build_solution_keyboard(
+    slug: str, approaches: list[dict], current_idx: int, current_lang: str,
+) -> InlineKeyboardMarkup:
+    """Build approach + language inline keyboard rows."""
+    # Row 1: approach buttons
+    approach_buttons = []
+    for i, approach in enumerate(approaches):
+        name = approach.get("name", f"Approach {i + 1}")
+        # Truncate long names
+        if len(name) > 18:
+            name = name[:16] + ".."
+        label = f"✓ {name}" if i == current_idx else name
+        approach_buttons.append(
+            InlineKeyboardButton(label, callback_data=_encode_solution_callback(slug, i, current_lang))
+        )
+
+    # Row 2: language buttons (only languages available in current approach)
+    current_approach = approaches[current_idx] if current_idx < len(approaches) else {}
+    available_langs = list((current_approach.get("code") or {}).keys())
+    lang_buttons = []
+    for lang in available_langs:
+        display = LANGUAGE_DISPLAY.get(lang, lang)
+        label = f"✓ {display}" if lang == current_lang else display
+        lang_buttons.append(
+            InlineKeyboardButton(label, callback_data=_encode_solution_callback(slug, current_idx, lang))
+        )
+
+    rows = []
+    if len(approaches) > 1:
+        rows.append(approach_buttons)
+    if lang_buttons:
+        rows.append(lang_buttons)
+    return InlineKeyboardMarkup(rows)
+
+
+async def cmd_solution(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not context.args:
+        await update.message.reply_text("Usage: /solution <title-slug>  e.g. /solution two-sum")
+        return
+
+    slug = context.args[0].lower().replace(" ", "-")
+    solution_data = get_cached_solution(slug)
+    if solution_data is None:
+        await update.message.reply_text(f"Solution for '{slug}' does not exist.")
+        return
+
+    approaches = solution_data.get("approaches", [])
+    if not approaches:
+        await update.message.reply_text(f"Solution for '{slug}' has no approaches.")
+        return
+
+    # Default: first approach, python
+    approach = approaches[0]
+    lang = "python"
+    # If python not available, use first available language
+    available_langs = list((approach.get("code") or {}).keys())
+    if lang not in available_langs and available_langs:
+        lang = available_langs[0]
+
+    text = format_solution_detail(slug, approach, lang)
+    keyboard = _build_solution_keyboard(slug, approaches, 0, lang)
+    await update.message.reply_text(text, parse_mode="HTML", disable_web_page_preview=True, reply_markup=keyboard)
+
+
+async def cmd_solution_nav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle approach/language button presses for /solution."""
+    query = update.callback_query
+    await query.answer()
+
+    slug, approach_idx, lang = _decode_solution_callback(query.data)
+    solution_data = get_cached_solution(slug)
+    if solution_data is None:
+        await query.answer("Solution no longer available.", show_alert=True)
+        return
+
+    approaches = solution_data.get("approaches", [])
+    if approach_idx >= len(approaches):
+        await query.answer("Invalid approach.", show_alert=True)
+        return
+
+    approach = approaches[approach_idx]
+    text = format_solution_detail(slug, approach, lang)
+    keyboard = _build_solution_keyboard(slug, approaches, approach_idx, lang)
+    try:
+        await query.edit_message_text(text, parse_mode="HTML", disable_web_page_preview=True, reply_markup=keyboard)
+    except Exception:
+        pass  # Ignore "Message is not modified" on same-button taps
+
+
 async def cmd_challenge(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     challenge = await fetch_daily_challenge()
     if challenge is None:
@@ -501,6 +614,8 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(cmd_problems_page, pattern=r"^p:"))
     app.add_handler(CommandHandler("problem", cmd_problem))
     app.add_handler(CommandHandler("challenge", cmd_challenge))
+    app.add_handler(CommandHandler("solution", cmd_solution))
+    app.add_handler(CallbackQueryHandler(cmd_solution_nav, pattern=r"^s:"))
 
     logger.info("Bot starting...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)

@@ -842,6 +842,46 @@ def format_problem_detail(question: dict) -> str:
     return "\n".join(lines)
 
 
+LANGUAGE_DISPLAY = {
+    "python": "Python",
+    "java": "Java",
+    "cpp": "C++",
+    "javascript": "JavaScript",
+    "go": "Go",
+}
+
+
+def format_solution_detail(slug: str, approach: dict, language: str) -> str:
+    """Format a single solution approach for HTML mode."""
+    name = _html_escape(approach.get("name", "Unknown"))
+    explanation = _html_escape(approach.get("explanation", ""))
+    time_c = _html_escape(approach.get("time_complexity", ""))
+    space_c = _html_escape(approach.get("space_complexity", ""))
+    code = approach.get("code", {}).get(language, "")
+    lang_display = LANGUAGE_DISPLAY.get(language, language)
+
+    lines = [f"💡 <b>Solution: {_html_escape(slug)}</b> · <code>{_html_escape(lang_display)}</code>"]
+    lines.append(f"<b>Approach:</b> {name}")
+
+    if explanation:
+        lines.append(f"\n{explanation}")
+
+    if code:
+        lines.append(f"\n<pre><code>{_html_escape(code)}</code></pre>")
+
+    if time_c or space_c:
+        parts = []
+        if time_c:
+            parts.append(f"Time: <code>{time_c}</code>")
+        if space_c:
+            parts.append(f"Space: <code>{space_c}</code>")
+        lines.append(" · ".join(parts))
+
+    lines.append(f"\n<a href=\"https://leetcode.com/problems/{slug}/\">Open on LeetCode</a>")
+
+    return "\n".join(lines)
+
+
 def format_daily_challenge(challenge: dict) -> str:
     """Format today's daily challenge in HTML mode."""
     if not challenge:

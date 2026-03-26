@@ -3,6 +3,8 @@ import os
 BOT_TOKEN = os.environ.get("LEETCODE_BOT_TOKEN", "")
 LEETCODE_GRAPHQL_URL = "https://leetcode.com/graphql"
 STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "state.json")
+PROBLEM_CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "problem_cache.json")
+SOLUTION_CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "solution_cache.json")
 DEFAULT_TIMEZONE = "Asia/Singapore"
 FETCH_DELAY_SECONDS = 1.0
 
