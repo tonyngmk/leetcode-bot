@@ -83,6 +83,8 @@ def get_snapshot(chat_id: str, username: str, tz: ZoneInfo) -> Optional[dict]:
     """Return snapshot dict with 'counts' and 'timestamp' keys, or None."""
     date_str = _today_str(tz)
     snapshots = storage.load_snapshots(chat_id, date_str)
+    if snapshots is None:
+        return None
     return snapshots.get(username)
 
 
@@ -96,7 +98,7 @@ def get_week_snapshot(chat_id: str, username: str, tz: ZoneInfo) -> Optional[dic
     for days_back in range(days_since_monday, -1, -1):
         date_str = (now.date() - timedelta(days=days_back)).strftime("%Y-%m-%d")
         snapshots = storage.load_snapshots(chat_id, date_str)
-        if username in snapshots:
+        if snapshots and username in snapshots:
             return snapshots[username]
     return None
 
@@ -285,18 +287,44 @@ def extract_constraints(content: str) -> list[str]:
 
 
 def extract_description(content: str) -> str:
-    """Extract only the first paragraph as the core problem description.
+    """Extract all description paragraphs, stopping at assumptions or section headers.
 
-    Takes only the first <p> tag to avoid including assumptions, constraints,
-    or other explanatory text that should be in dedicated sections.
+    Includes multiple paragraphs that make up the core problem statement, but excludes
+    assumption text (You may assume, Note that, You can return) and formal section
+    headers (Constraints, Example, etc).
     """
     if not content:
         return ""
-    # Extract only the first <p>...</p> block - the core problem statement
-    match = re.search(r'<p>(.*?)</p>', content, re.DOTALL)
-    if match:
-        return f"<p>{match.group(1)}</p>"
-    return ""
+
+    # Find the position of the first section header (Constraints, Example, Assumptions, etc.)
+    section_pattern = r'<p><strong[^>]*>(Constraints|Example|Assumptions|Follow[- ]?up|Note:)'
+    section_match = re.search(section_pattern, content, re.IGNORECASE)
+
+    # Determine where description ends
+    description_end = len(content) if not section_match else section_match.start()
+    description_section = content[:description_end]
+
+    # Extract all <p> tags from the description section, excluding assumptions
+    paragraphs = []
+    pattern = r'<p>(.*?)</p>'
+    for match in re.finditer(pattern, description_section, re.DOTALL):
+        para_content = match.group(1)
+        if not para_content.strip():
+            continue
+
+        # Check if this paragraph looks like an assumption/note (stop here if so)
+        para_lower = para_content.lower()
+        skip_patterns = [
+            r'you\s+(may\s+assume|can\s+return)',
+            r'note\s+that',
+            r'you\s+can\s+modify',
+        ]
+        if any(re.search(pattern, para_lower) for pattern in skip_patterns):
+            break  # Stop at assumptions, don't include them or anything after
+
+        paragraphs.append(f"<p>{para_content}</p>")
+
+    return "\n".join(paragraphs) if paragraphs else ""
 
 
 def extract_examples(content: str) -> list[str]:
