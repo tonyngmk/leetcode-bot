@@ -138,6 +138,36 @@ class TestFormatProblems:
         # Should escape special chars
         assert "\\." in output or "Two Sum" in output, "Should handle title with special chars"
 
+    def test_format_problems_markdown_v2_balanced_asterisks(self):
+        """MarkdownV2 format should have balanced asterisks (no parsing errors)."""
+        result = {
+            "total": 2,
+            "questions": [
+                {
+                    "questionFrontendId": "1",
+                    "title": "Two Sum",
+                    "titleSlug": "two-sum",
+                    "difficulty": "Easy",
+                    "acRate": 50.0,
+                    "topicTags": [{"name": "Array"}],
+                },
+                {
+                    "questionFrontendId": "2",
+                    "title": "Add Two Numbers",
+                    "titleSlug": "add-two-numbers",
+                    "difficulty": "Medium",
+                    "acRate": 60.0,
+                    "topicTags": [{"name": "Math"}],
+                },
+            ],
+        }
+        output = format_problems(result, "")
+        # Check that all asterisks are balanced
+        lines = output.split('\n')
+        for line in lines:
+            asterisk_count = line.count('*')
+            assert asterisk_count % 2 == 0, f"Unbalanced asterisks in line: {line}"
+
     def test_format_problems_with_problematic_chars_in_tags(self):
         """Tag names with reserved chars should be escaped."""
         result = {

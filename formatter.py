@@ -473,7 +473,7 @@ def format_problems(result: dict, filters_desc: str, page: int = 0, page_size: i
         else:
             problem_link = f"https://leetcode.com/problems/{slug}/"
 
-        line = f"{emoji} *{frontend_id}\\. [{title}]({problem_link}) `{slug}` · {ac_rate_str}"
+        line = f"{emoji} *{frontend_id}\\.*  [{title}]({problem_link}) `{slug}` · {ac_rate_str}"
         if tags_str:
             line += f" · {tags_str}"
         lines.append(line)
