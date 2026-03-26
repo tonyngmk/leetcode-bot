@@ -606,12 +606,18 @@ def format_problem_detail(question: dict) -> str:
 
     # Examples: extract from <pre> blocks in content HTML
     examples = extract_examples(content)
+    images = extract_images(content)
+
     if examples:
         for i, example in enumerate(examples[:3], 1):
             lines.append(f"\n<b>Example {i}:</b>")
             # In HTML mode, use <pre> for preformatted code (no escaping of = etc)
             escaped_example = _html_escape(example)
             lines.append(f"<pre>{escaped_example}</pre>")
+    elif images:
+        # If there are images but no text examples, show header to indicate examples are above
+        lines.append("\n<b>Examples:</b>")
+        lines.append("<i>See images above</i>")
 
     # Constraints: extract from HTML and format as bullet points
     constraints = extract_constraints(content)
