@@ -282,7 +282,7 @@ async def cmd_daily(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     tz = _tz(chat_id)
     profiles = await fetch_all_users(users)
-    text = await format_daily(chat_id, profiles, tz)
+    text = await format_daily(chat_id, profiles, tz, bot_username=_bot_username)
     await update.message.reply_text(
         text, parse_mode="MarkdownV2", disable_web_page_preview=True,
     )
@@ -297,7 +297,7 @@ async def cmd_weekly(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
     tz = _tz(chat_id)
     profiles = await fetch_all_users(users)
-    text = await format_weekly(chat_id, profiles, tz)
+    text = await format_weekly(chat_id, profiles, tz, bot_username=_bot_username)
     await update.message.reply_text(
         text, parse_mode="MarkdownV2", disable_web_page_preview=True,
     )

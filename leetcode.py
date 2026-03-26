@@ -271,18 +271,45 @@ def _strip_html(text: str) -> str:
 
 
 def extract_constraints(content: str) -> list[str]:
-    """Extract constraint list items from HTML content."""
+    """Extract constraint list items from after the 'Constraints:' section header.
+
+    Looks for the 'Constraints:' section and extracts only <li> items from that
+    section onwards, stopping at the next major section (Follow-up, Notes, etc).
+    This avoids including method signatures or implementation requirements that
+    appear before the constraints.
+    """
     constraints = []
     if not content:
         return constraints
-    # Find <li> list items (typically within <ul> or <ol>)
+
+    # Find the Constraints section header
+    constraints_pattern = r'<p><strong[^>]*>Constraints'
+    constraints_match = re.search(constraints_pattern, content, re.IGNORECASE)
+
+    if not constraints_match:
+        return constraints
+
+    # Find where constraints section ends (next major section or end of content)
+    constraints_start = constraints_match.start()
+    follow_up_pattern = r'<p><strong[^>]*>(Follow[- ]?up|Notes?:)'
+    follow_up_match = re.search(follow_up_pattern, content[constraints_start:], re.IGNORECASE)
+
+    if follow_up_match:
+        constraints_end = constraints_start + follow_up_match.start()
+    else:
+        constraints_end = len(content)
+
+    constraints_section = content[constraints_start:constraints_end]
+
+    # Extract <li> items only from the constraints section
     pattern = r'<li>(.*?)</li>'
-    for match in re.finditer(pattern, content, re.DOTALL):
+    for match in re.finditer(pattern, constraints_section, re.DOTALL):
         constraint_html = match.group(1)
         # Strip HTML from constraint text
         constraint = _strip_html(constraint_html)
         if constraint:
             constraints.append(constraint)
+
     return constraints
 
 

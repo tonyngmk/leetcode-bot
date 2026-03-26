@@ -24,6 +24,7 @@ async def format_daily(
     chat_id: str,
     profiles: dict[str, Optional[dict]],
     tz: ZoneInfo,
+    bot_username: Optional[str] = None,
 ) -> str:
     """Format detailed daily progress view, sorted by problems solved."""
     if not profiles:
@@ -51,12 +52,21 @@ async def format_daily(
 
         # Count from submissions (what's visible in recent[])
         solved_today = len(subs)
-        # Store snapshot diff for emoji display (computed in render loop)
-        diff_breakdown = None  # Will compute from snapshot in render
+        # Build difficulty breakdown from submissions
+        diff_breakdown = {"Easy": 0, "Medium": 0, "Hard": 0}
 
         user_rows.append((username, profile, solved_today, diff_breakdown, subs, snapshot_data))
 
     difficulties = await fetch_question_difficulties(list(all_slugs))
+
+    # Populate difficulty breakdown for each user from their submissions
+    for i, (username, profile, solved_today, diff_breakdown, subs, snapshot_data) in enumerate(user_rows):
+        if profile is not None and diff_breakdown is not None:  # Only for users with data
+            for sub in subs:
+                slug = sub.get("titleSlug", "")
+                difficulty = difficulties.get(slug, "")
+                if difficulty in diff_breakdown:
+                    diff_breakdown[difficulty] += 1
 
     # Sort: by solved_today descending, then alphabetically. Users with no snapshot sort to bottom.
     user_rows.sort(key=lambda x: (0 if x[5] is not None else 1, -x[2], x[0].lower()))
@@ -99,7 +109,11 @@ async def format_daily(
                 slug = sub.get("titleSlug", "")
                 emoji = DIFFICULTY_EMOJI.get(difficulties.get(slug, ""), "")
                 prefix = f"{emoji} " if emoji else ""
-                lines.append(f"  {prefix}[{title}](https://leetcode.com/problems/{slug}/)")
+                if bot_username:
+                    problem_link = f"https://t.me/{bot_username}?start=problem_{slug}"
+                else:
+                    problem_link = f"https://leetcode.com/problems/{slug}/"
+                lines.append(f"  {prefix}[{title}]({problem_link})")
 
             # Overflow note if snapshot diff shows more solved than captured in recent[]
             if snapshot_data:
@@ -223,6 +237,7 @@ async def format_weekly(
     chat_id: str,
     profiles: dict[str, Optional[dict]],
     tz: ZoneInfo,
+    bot_username: Optional[str] = None,
 ) -> str:
     """Format detailed weekly progress view, sorted by problems solved."""
     if not profiles:
@@ -295,7 +310,11 @@ async def format_weekly(
                 difficulty = week_difficulties.get(slug, "")
                 emoji = DIFFICULTY_EMOJI.get(difficulty, "")
                 prefix = f"{emoji} " if emoji else ""
-                lines.append(f"  {prefix}[{title}](https://leetcode.com/problems/{slug}/)")
+                if bot_username:
+                    problem_link = f"https://t.me/{bot_username}?start=problem_{slug}"
+                else:
+                    problem_link = f"https://leetcode.com/problems/{slug}/"
+                lines.append(f"  {prefix}[{title}]({problem_link})")
 
             # Overflow note if snapshot diff shows more solved than captured in recent[]
             if compute_diff_total and compute_diff_total > len(subs):

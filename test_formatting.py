@@ -20,7 +20,7 @@ from formatter import (
     format_leaderboard,
     format_daily_challenge,
 )
-from leetcode import extract_images, map_images_to_examples, extract_examples
+from leetcode import extract_images, map_images_to_examples, extract_examples, extract_constraints
 
 
 # MarkdownV2 reserved characters that must be escaped: _*[]()~`>#+-=|{}.!
@@ -808,6 +808,83 @@ class TestExampleExtraction:
         assert "Input: grid = [[1,4],[2,3]]" in examples[0]
         assert "Output: true" in examples[0]
         assert "<img" not in examples[0]  # Images should be stripped
+
+
+class TestConstraintExtraction:
+    """Test constraint extraction from problem HTML."""
+
+    def test_extract_constraints_excludes_method_signatures(self):
+        """Should not include method signatures that appear before Constraints section."""
+        content = '''
+        <p><strong>Implement the MyCalendar class:</strong></p>
+        <ul>
+        <li>MyCalendar() Initializes the calendar object.</li>
+        <li>boolean book(int startTime, int endTime) Returns true if the event can be added to the calendar successfully without causing a double booking. Otherwise, return false and do not add the event to the calendar.</li>
+        </ul>
+        <p><strong>Constraints:</strong></p>
+        <ul>
+        <li>0 <= start < end <= 10^9</li>
+        <li>At most 1000 calls will be made to book.</li>
+        </ul>
+        '''
+        constraints = extract_constraints(content)
+        assert len(constraints) == 2, f"Expected 2 constraints, got {len(constraints)}: {constraints}"
+        assert "MyCalendar()" not in constraints[0], "Should not include method signatures"
+        assert "boolean book" not in " ".join(constraints), "Should not include method signatures"
+        assert "0 <= start < end <= 10^9" in constraints[0]
+        assert "At most 1000 calls" in constraints[1]
+
+    def test_extract_constraints_with_follow_up(self):
+        """Should stop extracting at Follow-up section."""
+        content = '''
+        <p><strong>Constraints:</strong></p>
+        <ul>
+        <li>1 <= n <= 100</li>
+        <li>0 <= nums[i] <= 100</li>
+        </ul>
+        <p><strong>Follow-up:</strong></p>
+        <p>Can you solve this in O(n) time?</p>
+        '''
+        constraints = extract_constraints(content)
+        assert len(constraints) == 2
+        assert "Follow-up" not in " ".join(constraints)
+        assert "1 <= n <= 100" in constraints[0]
+        assert "0 <= nums[i] <= 100" in constraints[1]
+
+    def test_extract_constraints_no_section(self):
+        """Should return empty list if no Constraints section."""
+        content = '<p>Some problem description</p><ul><li>Not a constraint</li></ul>'
+        constraints = extract_constraints(content)
+        assert len(constraints) == 0
+
+    def test_extract_constraints_empty_list(self):
+        """Should return empty list if Constraints section has no items."""
+        content = '''
+        <p><strong>Constraints:</strong></p>
+        <p>No constraints for this problem.</p>
+        '''
+        constraints = extract_constraints(content)
+        assert len(constraints) == 0
+
+    def test_extract_constraints_with_html_formatting(self):
+        """Should strip HTML from constraint text, preserving code formatting."""
+        content = '''
+        <p><strong>Constraints:</strong></p>
+        <ul>
+        <li><strong>1</strong> &lt;= <code>n</code> &lt;= <strong>100</strong></li>
+        <li>0 &lt;= <code>nums[i]</code> &lt;= 100</li>
+        </ul>
+        '''
+        constraints = extract_constraints(content)
+        assert len(constraints) == 2
+        assert "1 <=" in constraints[0] and "<= 100" in constraints[0]
+        assert "0 <=" in constraints[1] and "<= 100" in constraints[1]
+        # Code formatting should be preserved as backticks
+        assert "`n`" in constraints[0]
+        assert "`nums[i]`" in constraints[1]
+        # HTML tags should be stripped
+        assert "<strong>" not in constraints[0]
+        assert "<strong>" not in constraints[1]
 
 
 class TestEdgeCases:
