@@ -463,7 +463,7 @@ async def cmd_challenge(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
 
     text = format_daily_challenge(challenge)
-    await update.message.reply_text(text, parse_mode="MarkdownV2", disable_web_page_preview=True)
+    await update.message.reply_text(text, parse_mode="HTML", disable_web_page_preview=True)
 
 
 # --- Startup ---

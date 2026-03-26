@@ -643,14 +643,14 @@ def format_problem_detail(question: dict) -> str:
 
 
 def format_daily_challenge(challenge: dict) -> str:
-    """Format today's daily challenge."""
+    """Format today's daily challenge in HTML mode."""
     if not challenge:
         return "Failed to fetch daily challenge."
 
-    date = _esc(challenge.get("date", ""))
+    date = _html_escape(challenge.get("date", ""))
     question = challenge.get("question", {})
 
-    lines = [f"📅 *Daily Challenge — {date}*\n"]
+    lines = [f"📅 <b>Daily Challenge — {date}</b>\n"]
     lines.append(format_problem_detail(question))
 
     return "\n".join(lines)

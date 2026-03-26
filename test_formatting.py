@@ -17,6 +17,7 @@ from formatter import (
     format_daily,
     format_weekly,
     format_leaderboard,
+    format_daily_challenge,
 )
 from leetcode import extract_images, map_images_to_examples
 
@@ -519,6 +520,95 @@ class TestImageExtraction:
         assert len(mapping) == 1
         assert "image.jpeg" in list(mapping.keys())[0]
         assert "png" not in str(mapping)
+
+
+class TestFormatDailyChallenge:
+    """Test format_daily_challenge function for HTML validity."""
+
+    def test_format_daily_challenge_returns_valid_html(self):
+        """Daily challenge should return valid HTML without unescaped > characters."""
+        challenge = {
+            "date": "2026-03-26",
+            "question": {
+                "questionFrontendId": "1",
+                "title": "Two Sum",
+                "titleSlug": "two-sum",
+                "difficulty": "Easy",
+                "content": "<p>Given an array. Find two numbers.</p>",
+                "likes": 100,
+                "dislikes": 10,
+                "topicTags": [],
+                "hints": [],
+                "exampleTestcases": "",
+                "isPaidOnly": False,
+            }
+        }
+        output = format_daily_challenge(challenge)
+
+        # Should be valid HTML with proper tags
+        assert "<b>Daily Challenge" in output, "Header should use HTML bold tags"
+        assert "<b>" in output, "Should use HTML formatting"
+        # No unescaped > characters (except in HTML tags)
+        # Count opening and closing tags
+        assert output.count("<") == output.count(">"), "HTML tags should be matched"
+
+    def test_format_daily_challenge_with_special_chars_in_date(self):
+        """Daily challenge date with special chars should be properly escaped."""
+        challenge = {
+            "date": "Mar & 26 > 2026",  # Contains special chars
+            "question": {
+                "questionFrontendId": "1",
+                "title": "Test",
+                "titleSlug": "test",
+                "difficulty": "Easy",
+                "content": "<p>Test.</p>",
+                "likes": 0,
+                "dislikes": 0,
+                "topicTags": [],
+                "hints": [],
+                "isPaidOnly": False,
+            }
+        }
+        output = format_daily_challenge(challenge)
+
+        # HTML special chars should be escaped
+        assert "&amp;" in output, "& should be escaped as &amp;"
+        assert "&gt;" in output, "> should be escaped as &gt;"
+        # No unescaped special chars outside of HTML tags
+        assert output.count("<") == output.count(">"), "HTML tags should be matched"
+
+    def test_format_daily_challenge_includes_problem_detail(self):
+        """Daily challenge should include full problem detail."""
+        challenge = {
+            "date": "2026-03-26",
+            "question": {
+                "questionFrontendId": "42",
+                "title": "Median of Two Sorted Arrays",
+                "titleSlug": "median-of-two-sorted-arrays",
+                "difficulty": "Hard",
+                "content": "<p>Given two sorted arrays.</p>",
+                "likes": 500,
+                "dislikes": 50,
+                "topicTags": [{"name": "Array"}],
+                "hints": ["Use binary search"],
+                "isPaidOnly": False,
+            }
+        }
+        output = format_daily_challenge(challenge)
+
+        # Should include date
+        assert "2026-03-26" in output, "Date should be present"
+        # Should include problem title
+        assert "Median of Two Sorted Arrays" in output, "Problem title should be present"
+        # Should include problem frontend ID
+        assert "42" in output, "Problem ID should be present"
+        # Should include engagement metrics
+        assert "500" in output, "Likes should be present"
+
+    def test_format_daily_challenge_empty_challenge(self):
+        """Empty challenge should return error message."""
+        output = format_daily_challenge({})
+        assert "Failed" in output, "Should return error message for empty challenge"
 
 
 class TestEdgeCases:
