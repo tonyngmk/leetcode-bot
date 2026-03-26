@@ -12,6 +12,7 @@ import pytest
 from formatter import (
     _esc,
     _esc_preserve_code,
+    _esc_preserve_html_tags,
     format_problems,
     format_problem_detail,
     format_daily,
@@ -58,6 +59,61 @@ class TestEscaping:
         assert "`code`" in result, "Code backticks should be preserved"
         assert "\\." in result, "Periods should be escaped"
         assert "\\[" in result, "Brackets should be escaped"
+
+
+class TestHtmlTagPreservation:
+    """Test _esc_preserve_html_tags function for preserving safe HTML while escaping content."""
+
+    def test_esc_preserve_html_tags_preserves_code(self):
+        """Should preserve <code> tags while escaping other content."""
+        text = "Use <code>x</code> in your code."
+        result = _esc_preserve_html_tags(text)
+        assert "<code>" in result, "<code> tag should be preserved"
+        assert "</code>" in result, "</code> tag should be preserved"
+        # Text outside code tags remains mostly as-is (HTML escape only, not MarkdownV2)
+        assert "x</code>" in result, "Code content should be preserved"
+
+    def test_esc_preserve_html_tags_escapes_dangerous_chars(self):
+        """Should preserve code tags and escape dangerous HTML chars."""
+        text = "Variable <code>arr[i]</code> has & special."
+        result = _esc_preserve_html_tags(text)
+        assert "<code>arr[i]</code>" in result, "<code> tags should be intact with content"
+        assert "&amp;" in result, "& should be escaped to &amp;"
+
+    def test_esc_preserve_html_tags_with_strong(self):
+        """Should preserve <strong> tags and escape ampersands."""
+        text = "This is <strong>important</strong> & critical."
+        result = _esc_preserve_html_tags(text)
+        assert "<strong>" in result, "<strong> tag should be preserved"
+        assert "</strong>" in result, "</strong> tag should be preserved"
+        assert "&amp;" in result, "& should be escaped to &amp;"
+
+    def test_esc_preserve_html_tags_multiple_tags(self):
+        """Should preserve multiple HTML tags."""
+        text = "Use <code>x</code> and <strong>y</strong> & more."
+        result = _esc_preserve_html_tags(text)
+        assert "<code>" in result, "<code> tag should be preserved"
+        assert "<strong>" in result, "<strong> tag should be preserved"
+        assert "x</code>" in result, "code tag content should be intact"
+        assert "y</strong>" in result, "strong tag content should be intact"
+
+    def test_esc_preserve_html_tags_nested_not_supported(self):
+        """Function handles properly formed tags; nested tags may need careful handling."""
+        # This tests basic non-nested case
+        text = "<code>x = 5</code>"
+        result = _esc_preserve_html_tags(text)
+        assert "<code>x = 5</code>" in result
+
+    def test_esc_preserve_html_tags_with_hints_example(self):
+        """Should handle real hint text with code tags from LeetCode."""
+        hint = "So, if we fix one of the numbers, say <code>x</code>, we have to scan the array to find <code>y</code> which is <code>value - x</code>."
+        result = _esc_preserve_html_tags(hint)
+        # All code tags should be preserved
+        assert result.count("<code>") == 3, "Should have 3 opening <code> tags"
+        assert result.count("</code>") == 3, "Should have 3 closing </code> tags"
+        # Hyphens and other chars should be escaped if needed
+        assert "x</code>" in result, "First code block should be intact"
+        assert "y</code>" in result, "Second code block should be intact"
 
 
 class TestFormatProblems:
@@ -186,6 +242,34 @@ class TestFormatProblemDetail:
         # Hints should be present using HTML formatting
         assert "<b>Hints:</b>" in output, "Hints section should be present"
         assert "Hint" in output, "Hint text should be present"
+
+    def test_format_problem_detail_with_code_tags_in_hints(self):
+        """Hints with <code> tags should preserve the tags and display as monospace."""
+        question = {
+            "questionFrontendId": "1",
+            "title": "Two Sum",
+            "titleSlug": "two-sum",
+            "difficulty": "Easy",
+            "content": "<p>Test.</p>",
+            "likes": 0,
+            "dislikes": 0,
+            "topicTags": [],
+            "hints": [
+                "Use <code>x</code> and <code>y</code> to find the sum.",
+                "Check if <code>value - x</code> exists in the array.",
+            ],
+            "exampleTestcases": "",
+            "isPaidOnly": False,
+        }
+        output = format_problem_detail(question)
+        # Should have Hints section
+        assert "<b>Hints:</b>" in output, "Hints section should be present"
+        # <code> tags should be preserved, not escaped
+        assert "<code>x</code>" in output, "<code>x</code> should be in output"
+        assert "<code>y</code>" in output, "<code>y</code> should be in output"
+        assert "<code>value - x</code>" in output, "<code>value - x</code> should be in output"
+        # Should NOT have escaped code tags
+        assert "&lt;code&gt;" not in output, "Code tags should not be escaped"
 
     def test_format_problem_detail_with_all_special_chars(self):
         """Test that all special chars in content are handled in HTML mode."""

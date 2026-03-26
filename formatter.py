@@ -513,6 +513,46 @@ def _convert_backticks_to_html(text: str) -> str:
     return text
 
 
+def _esc_preserve_html_tags(text: str) -> str:
+    """Escape HTML special characters but preserve safe HTML tags like <code>.
+
+    This is useful for content that already contains HTML formatting from the source.
+    Preserves: <code></code>, <strong></strong>, <em></em>, <b></b>, <i></i>
+    Escapes everything else.
+    """
+    if not text:
+        return text
+
+    # Store safe HTML tags temporarily
+    safe_tags = {}
+    counter = 0
+
+    # Match safe HTML tags: <code>...</code>, <strong>...</strong>, etc.
+    safe_patterns = [
+        r'<code>(.*?)</code>',
+        r'<strong>(.*?)</strong>',
+        r'<em>(.*?)</em>',
+        r'<b>(.*?)</b>',
+        r'<i>(.*?)</i>',
+    ]
+
+    for pattern in safe_patterns:
+        for match in re.finditer(pattern, text, re.DOTALL):
+            placeholder = f"\uFFF0SAFE_TAG_{counter}\uFFF1"
+            safe_tags[placeholder] = match.group(0)
+            text = text.replace(match.group(0), placeholder, 1)
+            counter += 1
+
+    # Now escape all HTML special characters
+    text = _html_escape(text)
+
+    # Restore safe tags
+    for placeholder, tag in safe_tags.items():
+        text = text.replace(placeholder, tag)
+
+    return text
+
+
 def _clean_description_text(text: str) -> str:
     """Remove constraint and example-like text from problem description.
 
@@ -627,8 +667,9 @@ def format_problem_detail(question: dict) -> str:
     if hints and len(hints) > 0:
         lines.append("\n<b>Hints:</b>")
         for hint in hints[:3]:
-            escaped_hint = _html_escape(hint)
-            # Convert backticks to code tags
+            # Preserve existing HTML tags (like <code>) while escaping other content
+            escaped_hint = _esc_preserve_html_tags(hint)
+            # Also convert any backticks to code tags (for backtick-style code)
             escaped_hint = _convert_backticks_to_html(escaped_hint)
             lines.append(f"• <tg-spoiler>{escaped_hint}</tg-spoiler>")
 
