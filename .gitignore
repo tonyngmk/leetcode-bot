@@ -5,3 +5,4 @@ __pycache__/
 .venv/
 problem_cache.json
 solution_cache.json
+solution_gen_progress.json

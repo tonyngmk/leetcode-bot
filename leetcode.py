@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+import tempfile
 from datetime import datetime, timedelta, time
 from typing import Optional
 from zoneinfo import ZoneInfo
@@ -108,10 +109,29 @@ def get_cached_solution(slug: str) -> Optional[dict]:
 
 
 def save_solution(slug: str, data: dict) -> None:
-    """Store solution in cache and persist."""
-    _load_solution_cache()
-    _solution_cache[slug] = data
-    _save_solution_cache()
+    """Store solution in cache and persist atomically (merge-safe for concurrent writes)."""
+    import tempfile, os as _os
+    # Always read current state from disk to avoid race conditions
+    current: dict = {}
+    if os.path.exists(SOLUTION_CACHE_FILE):
+        try:
+            with open(SOLUTION_CACHE_FILE) as f:
+                current = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            current = {}
+    current[slug] = data
+    # Atomic write: write to temp, then rename
+    dir_ = os.path.dirname(SOLUTION_CACHE_FILE) or "."
+    fd, tmp = tempfile.mkstemp(dir=dir_, suffix=".json")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(current, f, separators=(",", ":"))
+        os.replace(tmp, SOLUTION_CACHE_FILE)
+    except OSError:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
 
 
 def _parse_ac_counts(ac_submission_num: list[dict]) -> dict[str, int]:
