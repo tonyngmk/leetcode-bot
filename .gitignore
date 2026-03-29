@@ -6,3 +6,5 @@ __pycache__/
 problem_cache.json
 solution_cache.json
 solution_gen_progress.json
+analytics/*.csv
+credentials.json

@@ -32,6 +32,7 @@ from leetcode import (
     extract_constraints,
     get_cached_solution,
     save_solution,
+    _to_superscript,
 )
 
 
@@ -198,6 +199,40 @@ class TestFormatProblems:
         output = format_problems(result, "")
         # Should have no unescaped reserved chars outside of markdown syntax
         assert "*Problem List*" in output, "Should contain header"
+
+
+class TestProblemDetailSolutionLink:
+    """Test that format_problem_detail includes/excludes solution deep-link."""
+
+    BASE_QUESTION = {
+        "questionFrontendId": "1",
+        "title": "Two Sum",
+        "titleSlug": "two-sum",
+        "difficulty": "Easy",
+        "content": "<p>Find two numbers that add up to target.</p>",
+        "likes": 100,
+        "dislikes": 10,
+        "topicTags": [],
+        "hints": [],
+        "isPaidOnly": False,
+    }
+
+    def test_solution_link_shown_when_has_solution(self):
+        output = format_problem_detail(self.BASE_QUESTION, has_solution=True, bot_username="testbot")
+        assert "View Solution" in output
+        assert "t.me/testbot?start=solution_two-sum" in output
+
+    def test_solution_link_hidden_when_no_solution(self):
+        output = format_problem_detail(self.BASE_QUESTION, has_solution=False, bot_username="testbot")
+        assert "View Solution" not in output
+
+    def test_solution_link_hidden_when_no_bot_username(self):
+        output = format_problem_detail(self.BASE_QUESTION, has_solution=True, bot_username=None)
+        assert "View Solution" not in output
+
+    def test_solution_link_hidden_by_default(self):
+        output = format_problem_detail(self.BASE_QUESTION)
+        assert "View Solution" not in output
 
 
 class TestFormatProblemDetail:
@@ -991,10 +1026,10 @@ class TestRichFormatting:
         assert "• Second rule" in output
 
     def test_description_superscripts(self):
-        """<sup> should become ^n notation."""
+        """<sup> should become Unicode superscript characters."""
         q = self._make_question("<p>The value is 10<sup>4</sup>.</p>")
         output = format_problem_detail(q)
-        assert "10^4" in output
+        assert "10\u2074" in output  # 10⁴
 
     def test_description_paragraphs_separated(self):
         """Paragraphs should be separated, not concatenated."""
@@ -1027,7 +1062,36 @@ class TestRichFormatting:
         q = self._make_question(content)
         output = format_problem_detail(q)
         assert "<code>1</code>" in output
-        assert "10^4" in output
+        assert "10\u2074" in output  # 10⁴
+
+    def test_description_superscripts_multidigit(self):
+        """<sup>31</sup> should produce Unicode superscript ³¹."""
+        q = self._make_question("<p>The range is -2<sup>31</sup> to 2<sup>31</sup> - 1.</p>")
+        output = format_problem_detail(q)
+        assert "2\u00B3\u00B9" in output  # 2³¹
+
+    def test_description_superscripts_negative(self):
+        """<sup> with minus should use Unicode superscript minus."""
+        q = self._make_question("<p>Value is 10<sup>-9</sup>.</p>")
+        output = format_problem_detail(q)
+        assert "10\u207B\u2079" in output  # 10⁻⁹
+
+    def test_nbsp_not_literal_in_code_tags(self):
+        """&nbsp; inside <code> tags must not show literally."""
+        q = self._make_question(
+            "<p>Description.</p>"
+            "<p><strong>Constraints:</strong></p>"
+            "<ul><li><code>1&nbsp;&lt;=&nbsp;n</code></li></ul>"
+        )
+        output = format_problem_detail(q)
+        assert "&nbsp;" not in output
+
+    def test_nbsp_converted_to_space_in_description(self):
+        """&nbsp; in description text should become a regular space."""
+        q = self._make_question("<p>hello&nbsp;world</p>")
+        output = format_problem_detail(q)
+        assert "hello world" in output
+        assert "&nbsp;" not in output
 
     def test_truncation_respects_visible_length(self):
         """Truncation should count visible chars, not HTML tags."""
@@ -1192,6 +1256,44 @@ class TestTelegramHTMLSafety:
         )
         self._assert_no_bare_angles(result, "mixed entities inside/outside tags")
 
+    def test_nbsp_in_code_tags_safe(self):
+        """&nbsp; inside <code> tags must not appear literally in output."""
+        content = (
+            "<p>Description.</p>"
+            "<p><strong>Constraints:</strong></p>"
+            "<ul>"
+            "<li><code>1&nbsp;&lt;=&nbsp;n&nbsp;&lt;=&nbsp;10<sup>5</sup></code></li>"
+            "</ul>"
+        )
+        output = format_problem_detail(self._make_question(content))
+        self._assert_no_bare_angles(output, "&nbsp; in code tags")
+        assert "&nbsp;" not in output
+
+    def test_unicode_superscript_in_constraints_safe(self):
+        """Unicode superscripts in constraints must not break Telegram HTML safety."""
+        content = (
+            "<p>Find the target.</p>"
+            "<p><strong>Constraints:</strong></p>"
+            "<ul>"
+            "<li><code>2</code> &lt;= nums.length &lt;= <code>10<sup>4</sup></code></li>"
+            "<li><code>-10<sup>9</sup></code> &lt;= nums[i] &lt;= <code>10<sup>9</sup></code></li>"
+            "</ul>"
+        )
+        output = format_problem_detail(self._make_question(content))
+        self._assert_no_bare_angles(output, "unicode superscripts in constraints")
+        assert "\u2074" in output  # ⁴
+        assert "\u2079" in output  # ⁹
+
+    def test_convert_leetcode_html_to_telegram_nbsp_in_code(self):
+        """Direct test: &nbsp; inside <code> must become space, not show literally."""
+        result = _convert_leetcode_html_to_telegram(
+            '<code>1&nbsp;&lt;=&nbsp;n&nbsp;&lt;=&nbsp;10<sup>5</sup></code>'
+        )
+        self._assert_no_bare_angles(result, "&nbsp; direct converter test")
+        assert "&nbsp;" not in result
+        assert "<code>" in result
+        assert "&lt;=" in result
+
 
 class TestFormatSolutionDetail:
     """Test format_solution_detail output."""
@@ -1350,6 +1452,30 @@ class TestSolutionKeyboard:
         lang_row = keyboard.inline_keyboard[0]
         java_btn = [b for b in lang_row if "Java" in b.text][0]
         assert "✓" in java_btn.text
+
+
+class TestSuperscriptConversion:
+    """Test Unicode superscript conversion helper."""
+
+    def test_single_digit(self):
+        assert _to_superscript("4") == "\u2074"
+
+    def test_multi_digit(self):
+        assert _to_superscript("31") == "\u00B3\u00B9"
+
+    def test_negative(self):
+        assert _to_superscript("-9") == "\u207B\u2079"
+
+    def test_unmapped_characters_pass_through(self):
+        assert _to_superscript("abc") == "abc"
+
+    def test_mixed_mapped_and_unmapped(self):
+        result = _to_superscript("2x")
+        assert result[0] == "\u00B2"  # 2 mapped
+        assert result[1] == "x"       # x not mapped
+
+    def test_empty_string(self):
+        assert _to_superscript("") == ""
 
 
 if __name__ == "__main__":

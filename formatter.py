@@ -1,4 +1,5 @@
 import html
+import random
 import re
 from datetime import datetime
 from typing import Optional
@@ -7,14 +8,17 @@ from zoneinfo import ZoneInfo
 from leetcode import (
     DIFFICULTY_EMOJI,
     _strip_html,
+    _to_superscript,
     compute_diff,
     extract_constraints,
     extract_description,
     extract_examples,
     extract_images,
     fetch_question_difficulties,
+    filter_month_accepted,
     filter_today_accepted,
     filter_week_accepted,
+    get_month_snapshot,
     get_snapshot,
     get_week_daily_counts,
     get_week_snapshot,
@@ -139,8 +143,9 @@ async def format_leaderboard(
     chat_id: str,
     profiles: dict[str, Optional[dict]],
     tz: ZoneInfo,
+    ac_submissions: Optional[dict[str, Optional[list[dict]]]] = None,
 ) -> str:
-    """Format compact dual-ranking leaderboard (daily + weekly) with submissions-based counts."""
+    """Format compact leaderboard (daily + weekly + monthly + all-time)."""
     if not profiles:
         return "No users are being tracked. Use /add_user <username> to add one."
 
@@ -150,6 +155,7 @@ async def format_leaderboard(
     # Compute counts using submissions-based approach (consistent with /daily and /weekly)
     daily_data: list[tuple[str, list[dict]]] = []  # (username, subs)
     weekly_data: list[tuple[str, list[dict]]] = []  # (username, subs)
+    monthly_data: list[tuple[str, Optional[list[dict]]]] = []  # (username, subs or None)
 
     for username, profile in sorted(profiles.items(), key=lambda x: x[0].lower()):
         if profile is None:
@@ -181,6 +187,23 @@ async def format_leaderboard(
             if slug:
                 all_slugs.add(slug)
 
+        # Monthly: from AC submissions if available
+        if ac_submissions:
+            month_snapshot = get_month_snapshot(chat_id, username, tz)
+            ac_subs = ac_submissions.get(username) or []
+            if month_snapshot:
+                month_start_ts = month_snapshot["timestamp"]
+                month_subs = filter_month_accepted(ac_subs, month_start_ts)
+            else:
+                month_subs = None
+            monthly_data.append((username, month_subs))
+
+            if month_subs:
+                for sub in month_subs:
+                    slug = sub.get("titleSlug", "")
+                    if slug:
+                        all_slugs.add(slug)
+
     # Batch fetch difficulties
     difficulties = await fetch_question_difficulties(list(all_slugs))
 
@@ -208,9 +231,34 @@ async def format_leaderboard(
                 weekly_diff[difficulty] += 1
         weekly_users_processed.append((username, weekly_count, weekly_diff))
 
+    monthly_users_processed: list[tuple[str, Optional[int], dict[str, int]]] = []
+    for username, month_subs in monthly_data:
+        if month_subs is None:
+            monthly_users_processed.append((username, None, {}))
+        else:
+            monthly_count = len(month_subs)
+            month_diff = {"Easy": 0, "Medium": 0, "Hard": 0}
+            for sub in month_subs:
+                slug = sub.get("titleSlug", "")
+                difficulty = difficulties.get(slug, "")
+                if difficulty in month_diff:
+                    month_diff[difficulty] += 1
+            monthly_users_processed.append((username, monthly_count, month_diff))
+
+    # All-time: from profile counts directly
+    alltime_users: list[tuple[str, int, dict[str, int]]] = []
+    for username, profile in profiles.items():
+        if profile is None:
+            continue
+        counts = profile["counts"]
+        total = sum(counts.values())
+        alltime_users.append((username, total, counts))
+
     # Sort each section independently by count
     daily_users_processed.sort(key=lambda x: (-x[1], x[0].lower()))
     weekly_users_processed.sort(key=lambda x: (-x[1] if x[1] is not None else float('inf'), x[0].lower()))
+    monthly_users_processed.sort(key=lambda x: (-x[1] if x[1] is not None else float('inf'), x[0].lower()))
+    alltime_users.sort(key=lambda x: (-x[1], x[0].lower()))
 
     # === BUILD OUTPUT ===
     lines = ["*Leaderboard*\n", "*Today*"]
@@ -230,6 +278,23 @@ async def format_leaderboard(
         else:
             emoji_part = f" \\({_emoji_counts(week_diff)}\\)"
             lines.append(f"{i}\\. {_esc(username)} — *{weekly_count}*{emoji_part}")
+
+    if monthly_users_processed:
+        month_name = datetime.now(tz).strftime("%B")
+        lines.append(f"\n*This Month \\({_esc(month_name)}\\)*")
+        for i, (username, monthly_count, month_diff) in enumerate(monthly_users_processed, 1):
+            if monthly_count is None:
+                lines.append(f"{i}\\. {_esc(username)} — *\\?*")
+            elif monthly_count == 0:
+                lines.append(f"{i}\\. {_esc(username)} — *0*")
+            else:
+                emoji_part = f" \\({_emoji_counts(month_diff)}\\)"
+                lines.append(f"{i}\\. {_esc(username)} — *{monthly_count}*{emoji_part}")
+
+    lines.append("\n*All\\-Time*")
+    for i, (username, total, counts) in enumerate(alltime_users, 1):
+        emoji_part = f" \\({_emoji_counts(counts)}\\)"
+        lines.append(f"{i}\\. {_esc(username)} — *{total}*{emoji_part}")
 
     return "\n".join(lines)
 
@@ -331,6 +396,99 @@ async def format_weekly(
     if chart:
         lines.append("\n📈 *Trend*")
         lines.append(f"```\n{chart}\n```")
+
+    return "\n".join(lines)
+
+
+async def format_monthly(
+    chat_id: str,
+    profiles: dict[str, Optional[dict]],
+    ac_submissions: dict[str, Optional[list[dict]]],
+    tz: ZoneInfo,
+    bot_username: Optional[str] = None,
+) -> str:
+    """Format detailed monthly progress view, sorted by problems solved."""
+    if not profiles:
+        return "No users are being tracked. Use /add_user <username> to add one."
+
+    all_slugs: set[str] = set()
+    user_rows: list[tuple[str, Optional[dict], Optional[int], list[dict], Optional[int]]] = []
+
+    for username, profile in profiles.items():
+        if profile is None:
+            user_rows.append((username, None, None, [], None))
+            continue
+
+        month_snapshot = get_month_snapshot(chat_id, username, tz)
+        ac_subs = ac_submissions.get(username) or []
+
+        if month_snapshot is None:
+            user_rows.append((username, profile, None, [], None))
+        else:
+            month_start_ts = month_snapshot["timestamp"]
+            month_subs = filter_month_accepted(ac_subs, month_start_ts)
+            month_diff = compute_diff(profile["counts"], month_snapshot["counts"])
+            month_diff_total = sum(month_diff.values())
+
+            for sub in month_subs:
+                slug = sub.get("titleSlug", "")
+                if slug:
+                    all_slugs.add(slug)
+
+            count = len(month_subs)
+            user_rows.append((username, profile, count, month_subs, month_diff_total))
+
+    difficulties = await fetch_question_difficulties(list(all_slugs))
+
+    # Sort: by count descending, then alphabetically. No-snapshot users at bottom.
+    user_rows.sort(key=lambda x: (0 if x[4] is not None else 1, -(x[2] if x[2] is not None else 0), x[0].lower()))
+
+    month_name = datetime.now(tz).strftime("%B")
+    lines = [f"*Monthly Progress \\({_esc(month_name)}\\)*\n"]
+
+    for username, profile, count, subs, diff_total in user_rows:
+        if profile is None:
+            lines.append(f"*{_esc(username)}*: _failed to fetch_\n")
+            continue
+
+        if count is None:
+            lines.append(f"*{_esc(username)}*: _No data for this month yet_\n")
+            continue
+
+        # Build difficulty breakdown from submissions
+        subs_diff = {"Easy": 0, "Medium": 0, "Hard": 0}
+        for sub in subs:
+            slug = sub.get("titleSlug", "")
+            difficulty = difficulties.get(slug, "")
+            if difficulty in subs_diff:
+                subs_diff[difficulty] += 1
+
+        emoji_part = ""
+        if count > 0:
+            emoji_part = f" \\({_emoji_counts(subs_diff)}\\)"
+        lines.append(f"*{_esc(username)}* — *{count}* this month{emoji_part}")
+
+        # Problem list (cap at 15 per user)
+        shown_subs = subs[:15]
+        if shown_subs:
+            for sub in shown_subs:
+                title = _esc(sub.get("title", "Unknown"))
+                slug = sub.get("titleSlug", "")
+                difficulty = difficulties.get(slug, "")
+                emoji = DIFFICULTY_EMOJI.get(difficulty, "")
+                prefix = f"{emoji} " if emoji else ""
+                if bot_username:
+                    problem_link = f"https://t.me/{bot_username}?start=problem_{slug}"
+                else:
+                    problem_link = f"https://leetcode.com/problems/{slug}/"
+                lines.append(f"  {prefix}[{title}]({problem_link})")
+
+            # Overflow note
+            if diff_total and diff_total > len(shown_subs):
+                overflow = diff_total - len(shown_subs)
+                lines.append(f"  _\\+{overflow} more not shown_")
+
+        lines.append("")
 
     return "\n".join(lines)
 
@@ -460,7 +618,7 @@ def _esc_preserve_code(text: str) -> str:
     return text
 
 
-def format_problems(result: dict, filters_desc: str, page: int = 0, page_size: int = 20, bot_username: Optional[str] = None) -> str:
+def format_problems(result: dict, filters_desc: str, page: int = 0, page_size: int = 20, bot_username: Optional[str] = None, solved_slugs: Optional[set[str]] = None) -> str:
     """Format problem list response."""
     if not result:
         return "Failed to fetch problems."
@@ -493,7 +651,8 @@ def format_problems(result: dict, filters_desc: str, page: int = 0, page_size: i
         else:
             problem_link = f"https://leetcode.com/problems/{slug}/"
 
-        line = f"{emoji} *{frontend_id}\\.*  [{title}]({problem_link}) `{slug}` · {ac_rate_str}"
+        solved_mark = "\u2705 " if solved_slugs and slug in solved_slugs else ""
+        line = f"{solved_mark}{emoji} *{frontend_id}\\.*  [{title}]({problem_link}) `{slug}` · {ac_rate_str}"
         if tags_str:
             line += f" · {tags_str}"
         lines.append(line)
@@ -502,6 +661,52 @@ def format_problems(result: dict, filters_desc: str, page: int = 0, page_size: i
     start = page * page_size + 1
     end = page * page_size + len(questions)
     lines.append(f"_Showing {start}–{end} of {total}\\. Use /problem \\<slug\\> for details\\._")
+
+    return "\n".join(lines)
+
+
+def format_solved_page(
+    username: str,
+    submissions: list[dict],
+    difficulties: dict[str, str],
+    total: int,
+    bot_username: Optional[str] = None,
+    tz: Optional[ZoneInfo] = None,
+) -> str:
+    """Format a user's recent accepted problems in MarkdownV2.
+
+    Submissions are in descending solve datetime order (most recent first).
+    """
+    lines = [f"*Solved by {_esc(username)}* \\({total} total\\)\n"]
+
+    for i, sub in enumerate(submissions, start=1):
+        title = _esc(sub.get("title", "Unknown"))
+        slug = sub.get("titleSlug", "")
+        difficulty = difficulties.get(slug, "")
+        emoji = DIFFICULTY_EMOJI.get(difficulty, "")
+        prefix = f"{emoji} " if emoji else ""
+        if bot_username:
+            problem_link = f"https://t.me/{bot_username}?start=problem_{slug}"
+        else:
+            problem_link = f"https://leetcode.com/problems/{slug}/"
+
+        # Format solve datetime
+        ts = int(sub.get("timestamp", 0))
+        if ts and tz:
+            dt = datetime.fromtimestamp(ts, tz=tz)
+            date_str = _esc(dt.strftime("%d %b %Y, %H:%M"))
+        elif ts:
+            dt = datetime.fromtimestamp(ts)
+            date_str = _esc(dt.strftime("%d %b %Y, %H:%M"))
+        else:
+            date_str = ""
+
+        line = f"{i}\\. {prefix}[{title}]({problem_link})"
+        if date_str:
+            line += f" — _{date_str}_"
+        lines.append(line)
+
+    lines.append(f"\n_Showing {len(submissions)} most recent_")
 
     return "\n".join(lines)
 
@@ -544,8 +749,13 @@ def _convert_leetcode_html_to_telegram(html_text: str) -> str:
 
     text = html_text
 
-    # 1. Convert <sup> to ^n notation (e.g. 10<sup>4</sup> → 10^4)
-    text = re.sub(r'<sup>(.*?)</sup>', r'^\1', text, flags=re.DOTALL)
+    # 0. Replace &nbsp; with regular space (must happen before placeholder protection
+    # in step 7, otherwise &nbsp; inside <code> tags would be captured literally
+    # and never unescaped, since Telegram doesn't recognize &nbsp;)
+    text = text.replace('&nbsp;', ' ')
+
+    # 1. Convert <sup> to Unicode superscript (e.g. 10<sup>4</sup> → 10⁴)
+    text = re.sub(r'<sup>(.*?)</sup>', lambda m: _to_superscript(m.group(1)), text, flags=re.DOTALL)
 
     # 2. Convert code blocks: <pre><code>...</code></pre> → <pre>...</pre>
     text = re.sub(r'<pre><code>(.*?)</code></pre>', r'<pre>\1</pre>', text, flags=re.DOTALL)
@@ -771,7 +981,7 @@ def _clean_description_text(text: str) -> str:
     return result
 
 
-def format_problem_detail(question: dict) -> str:
+def format_problem_detail(question: dict, *, has_solution: bool = False, bot_username: Optional[str] = None, solved: Optional[str] = None) -> str:
     """Format full problem detail for HTML mode (avoids MarkdownV2 parsing issues)."""
     if not question:
         return "Problem not found."
@@ -788,7 +998,12 @@ def format_problem_detail(question: dict) -> str:
     hints = question.get("hints", [])
     is_paid = question.get("isPaidOnly", False)
 
-    lines = [f"{emoji} <b>{frontend_id}. {title}</b> · <code>{slug}</code>"]
+    solved_badge = ""
+    if solved == "ac":
+        solved_badge = "\u2705 "
+    elif solved == "notac":
+        solved_badge = "\u274c "
+    lines = [f"{solved_badge}{emoji} <b>{frontend_id}. {title}</b> · <code>{slug}</code>"]
 
     # Tags
     if tags:
@@ -832,6 +1047,11 @@ def format_problem_detail(question: dict) -> str:
             escaped_hint = _convert_backticks_to_html(escaped_hint)
             lines.append(f"• <tg-spoiler>{escaped_hint}</tg-spoiler>")
 
+    # Solution deep-link (only if solution exists)
+    if has_solution and bot_username:
+        solution_link = f"https://t.me/{bot_username}?start=solution_{slug}"
+        lines.append(f'\n💡 <a href="{solution_link}">View Solution</a>')
+
     # Premium badge
     if is_paid:
         lines.append("\n⚠️ <i>Premium only</i>")
@@ -844,10 +1064,25 @@ def format_problem_detail(question: dict) -> str:
 
 LANGUAGE_DISPLAY = {
     "python": "Python",
+    "python3": "Python3",
     "java": "Java",
     "cpp": "C++",
+    "c": "C",
+    "csharp": "C#",
     "javascript": "JavaScript",
+    "typescript": "TypeScript",
     "go": "Go",
+    "golang": "Go",
+    "ruby": "Ruby",
+    "swift": "Swift",
+    "kotlin": "Kotlin",
+    "rust": "Rust",
+    "scala": "Scala",
+    "php": "PHP",
+    "dart": "Dart",
+    "racket": "Racket",
+    "erlang": "Erlang",
+    "elixir": "Elixir",
 }
 
 
@@ -892,5 +1127,190 @@ def format_daily_challenge(challenge: dict) -> str:
 
     lines = [f"📅 <b>Daily Challenge — {date}</b>\n"]
     lines.append(format_problem_detail(question))
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Daily 11pm reminder
+# ---------------------------------------------------------------------------
+
+_REMINDER_TEMPLATES = [
+    "🚨 *Oi\\!* {mentions} — zero LeetCode questions today\\! ⏰ You've got 1 hour before midnight, let's go\\! 💪",
+    "😱 {mentions} — your LeetCode today: absolutely nothing\\! 🫠 There's still time\\.\\.\\. 1 hour left, chop chop\\! 🏃",
+    "👀 {mentions} haven't touched LeetCode today\\! 🧊 Don't let the streak die — 1 hour to redeem yourselves\\! 🔥",
+    "🫵 {mentions} — 0 questions done today\\?\\! 😤 The clock's ticking\\.\\.\\. 1 problem before midnight, you got this\\! ⚡",
+    "📢 Friendly nudge for {mentions} — LeetCode counter is still at 0 today\\! 🥶 1 hour left, make it count\\! 🎯",
+]
+
+
+def format_reminder(zero_users: list[str], user_links: dict[str, dict]) -> str:
+    """Build a MarkdownV2 reminder message tagging users with 0 questions today."""
+    if not zero_users:
+        return ""
+
+    mentions = []
+    for username in zero_users:
+        link = user_links.get(username)
+        if link:
+            name = _esc(link["first_name"])
+            mentions.append(f"[{name}](tg://user?id={link['telegram_id']})")
+        else:
+            mentions.append(_esc(username))
+
+    mention_str = ", ".join(mentions)
+    return random.choice(_REMINDER_TEMPLATES).format(mentions=mention_str)
+
+
+# ---------------------------------------------------------------------------
+# Test / Submit result formatters (HTML mode)
+# ---------------------------------------------------------------------------
+
+_STATUS_EMOJI = {
+    10: "\u2705",   # Accepted
+    11: "\u274c",   # Wrong Answer
+    12: "\u274c",   # Memory Limit Exceeded
+    13: "\u274c",   # Output Limit Exceeded
+    14: "\u23f0",   # Time Limit Exceeded
+    15: "\U0001f4a5",  # Runtime Error
+    20: "\U0001f6ab",  # Compile Error
+}
+
+
+def format_test_result(result: dict, lang: str, slug: str) -> str:
+    """Format interpret (test) result for HTML mode."""
+    from config import STATUS_CODES
+
+    status_code = result.get("status_code", -1)
+    status_msg = STATUS_CODES.get(status_code, result.get("status_msg", "Unknown"))
+    emoji = _STATUS_EMOJI.get(status_code, "\u2753")
+    lang_display = LANGUAGE_DISPLAY.get(lang, lang)
+
+    lines = [f"{emoji} <b>Test Result: {_html_escape(slug)}</b> · <code>{_html_escape(lang_display)}</code>"]
+    lines.append(f"<b>Status:</b> {_html_escape(status_msg)}")
+
+    # Compile error
+    if status_code == 20:
+        compile_err = result.get("full_compile_error") or result.get("compile_error", "")
+        if compile_err:
+            lines.append(f"\n<b>Compile Error:</b>\n<pre>{_html_escape(compile_err)}</pre>")
+        return "\n".join(lines)
+
+    # Runtime error
+    if status_code == 15:
+        runtime_err = result.get("full_runtime_error") or result.get("runtime_error", "")
+        if runtime_err:
+            lines.append(f"\n<b>Runtime Error:</b>\n<pre>{_html_escape(runtime_err)}</pre>")
+
+    # Test case results
+    code_answer = result.get("code_answer", [])
+    expected_answer = result.get("expected_code_answer", [])
+    total = max(len(code_answer), len(expected_answer))
+
+    if total > 0:
+        passed = 0
+        lines.append("")
+        for i in range(total):
+            actual = code_answer[i] if i < len(code_answer) else "N/A"
+            expected = expected_answer[i] if i < len(expected_answer) else "N/A"
+            if actual == expected:
+                passed += 1
+                lines.append(f"\u2705 Test {i + 1}: <code>{_html_escape(str(actual))}</code>")
+            else:
+                lines.append(f"\u274c Test {i + 1}:")
+                lines.append(f"  Expected: <code>{_html_escape(str(expected))}</code>")
+                lines.append(f"  Got: <code>{_html_escape(str(actual))}</code>")
+        lines.append(f"\n<b>Passed:</b> {passed}/{total}")
+
+    # Runtime & memory
+    status_runtime = result.get("status_runtime")
+    status_memory = result.get("status_memory")
+    if status_runtime or status_memory:
+        perf_parts = []
+        if status_runtime:
+            perf_parts.append(f"Runtime: {_html_escape(status_runtime)}")
+        if status_memory:
+            perf_parts.append(f"Memory: {_html_escape(status_memory)}")
+        lines.append(" · ".join(perf_parts))
+
+    return "\n".join(lines)
+
+
+def format_submit_result(result: dict, lang: str, slug: str) -> str:
+    """Format submission result for HTML mode."""
+    from config import STATUS_CODES
+
+    status_code = result.get("status_code", -1)
+    status_msg = STATUS_CODES.get(status_code, result.get("status_msg", "Unknown"))
+    emoji = _STATUS_EMOJI.get(status_code, "\u2753")
+    lang_display = LANGUAGE_DISPLAY.get(lang, lang)
+
+    lines = [f"{emoji} <b>Submission: {_html_escape(slug)}</b> · <code>{_html_escape(lang_display)}</code>"]
+    lines.append(f"<b>Status:</b> {_html_escape(status_msg)}")
+
+    total_correct = result.get("total_correct")
+    total_testcases = result.get("total_testcases")
+    if total_correct is not None and total_testcases is not None:
+        lines.append(f"<b>Test Cases:</b> {total_correct}/{total_testcases}")
+
+    # Compile error
+    if status_code == 20:
+        compile_err = result.get("full_compile_error") or result.get("compile_error", "")
+        if compile_err:
+            lines.append(f"\n<b>Compile Error:</b>\n<pre>{_html_escape(compile_err)}</pre>")
+        return "\n".join(lines)
+
+    # Runtime error
+    if status_code == 15:
+        runtime_err = result.get("full_runtime_error") or result.get("runtime_error", "")
+        if runtime_err:
+            lines.append(f"\n<b>Runtime Error:</b>\n<pre>{_html_escape(runtime_err)}</pre>")
+
+    # For wrong answer, show failing test case
+    if status_code == 11:
+        last_input = result.get("input_formatted") or result.get("last_testcase", "")
+        expected = result.get("expected_output", "")
+        actual = result.get("code_output", "")
+        if last_input:
+            lines.append(f"\n<b>Failing Input:</b>\n<pre>{_html_escape(last_input)}</pre>")
+        if expected:
+            lines.append(f"<b>Expected:</b> <code>{_html_escape(expected)}</code>")
+        if actual:
+            lines.append(f"<b>Got:</b> <code>{_html_escape(actual)}</code>")
+
+    # Performance (for accepted)
+    status_runtime = result.get("status_runtime")
+    status_memory = result.get("status_memory")
+    if status_runtime or status_memory:
+        perf_parts = []
+        if status_runtime:
+            percentile_rt = result.get("runtime_percentile")
+            rt_str = _html_escape(status_runtime)
+            if percentile_rt:
+                rt_str += f" (beats {percentile_rt:.1f}%)"
+            perf_parts.append(f"Runtime: {rt_str}")
+        if status_memory:
+            percentile_mem = result.get("memory_percentile")
+            mem_str = _html_escape(status_memory)
+            if percentile_mem:
+                mem_str += f" (beats {percentile_mem:.1f}%)"
+            perf_parts.append(f"Memory: {mem_str}")
+        lines.append("\n" + "\n".join(perf_parts))
+
+    lines.append(f"\n<a href=\"https://leetcode.com/problems/{slug}/\">Open on LeetCode</a>")
+
+    return "\n".join(lines)
+
+
+def format_code_prompt(slug: str, code_snippet: Optional[str], lang: str) -> str:
+    """Format the prompt asking user to send their code."""
+    lang_display = LANGUAGE_DISPLAY.get(lang, lang)
+    lines = [f"\U0001f4dd <b>Send your {_html_escape(lang_display)} code for <code>{_html_escape(slug)}</code></b>"]
+
+    if code_snippet:
+        lines.append(f"\n<b>Function signature:</b>\n<pre>{_html_escape(code_snippet)}</pre>")
+
+    lines.append("\nPaste your complete solution as a message. Code blocks (```) are supported.")
+    lines.append("Use /cancel to abort.")
 
     return "\n".join(lines)

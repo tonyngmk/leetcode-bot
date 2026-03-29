@@ -3,6 +3,7 @@ import os
 BOT_TOKEN = os.environ.get("LEETCODE_BOT_TOKEN", "")
 LEETCODE_GRAPHQL_URL = "https://leetcode.com/graphql"
 STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "state.json")
+CREDENTIALS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "credentials.json")
 PROBLEM_CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "problem_cache.json")
 SOLUTION_CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "solution_cache.json")
 DEFAULT_TIMEZONE = "Asia/Singapore"
@@ -65,6 +66,7 @@ query ($categorySlug: String, $limit: Int, $skip: Int, $filters: QuestionListFil
 PROBLEM_DETAIL_QUERY = """
 query ($titleSlug: String!) {
   question(titleSlug: $titleSlug) {
+    questionId
     questionFrontendId
     title
     titleSlug
@@ -80,6 +82,11 @@ query ($titleSlug: String!) {
     isPaidOnly
     exampleTestcases
     stats
+    codeSnippets {
+      lang
+      langSlug
+      code
+    }
   }
 }
 """
@@ -105,3 +112,63 @@ query {
   }
 }
 """
+
+GLOBAL_DATA_QUERY = """
+query {
+  userStatus {
+    username
+    isSignedIn
+  }
+}
+"""
+
+PROBLEM_STATUS_QUERY = """
+query ($titleSlug: String!) {
+  question(titleSlug: $titleSlug) {
+    status
+  }
+}
+"""
+
+RECENT_AC_SUBMISSIONS_QUERY = """
+query recentAcSubmissionList($username: String!, $limit: Int!) {
+  recentAcSubmissionList(username: $username, limit: $limit) {
+    id
+    title
+    titleSlug
+    timestamp
+  }
+}
+"""
+
+STATUS_CODES = {
+    10: "Accepted",
+    11: "Wrong Answer",
+    12: "Memory Limit Exceeded",
+    13: "Output Limit Exceeded",
+    14: "Time Limit Exceeded",
+    15: "Runtime Error",
+    20: "Compile Error",
+}
+
+LEETCODE_LANG_SLUGS = {
+    "python3": "Python3",
+    "python": "Python",
+    "java": "Java",
+    "cpp": "C++",
+    "c": "C",
+    "csharp": "C#",
+    "javascript": "JavaScript",
+    "typescript": "TypeScript",
+    "go": "Go",
+    "ruby": "Ruby",
+    "swift": "Swift",
+    "kotlin": "Kotlin",
+    "rust": "Rust",
+    "scala": "Scala",
+    "php": "PHP",
+    "dart": "Dart",
+    "racket": "Racket",
+    "erlang": "Erlang",
+    "elixir": "Elixir",
+}

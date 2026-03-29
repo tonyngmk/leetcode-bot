@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-from config import DEFAULT_TIMEZONE, STATE_FILE
+from config import CREDENTIALS_FILE, DEFAULT_TIMEZONE, STATE_FILE
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +62,8 @@ def remove_user(chat_id: str, username: str) -> bool:
     if not actual:
         return False
     chat["users"].remove(actual)
+    # Clean up user_links entry if present
+    chat.get("user_links", {}).pop(actual, None)
     _save(data)
     return True
 
@@ -83,6 +85,32 @@ def get_interval(chat_id: str) -> str:
 
 def get_timezone(chat_id: str) -> str:
     return get_chat(chat_id).get("timezone", DEFAULT_TIMEZONE)
+
+
+def link_user(chat_id: str, lc_username: str, telegram_id: int, first_name: str) -> None:
+    """Store mapping from LeetCode username to Telegram user info."""
+    data = _load()
+    chat = _ensure_chat(data, chat_id)
+    links = chat.setdefault("user_links", {})
+    links[lc_username] = {"telegram_id": telegram_id, "first_name": first_name}
+    _save(data)
+
+
+def get_user_links(chat_id: str) -> dict[str, dict]:
+    """Return {lc_username: {'telegram_id': int, 'first_name': str}} for the chat."""
+    return get_chat(chat_id).get("user_links", {})
+
+
+def set_reminder(chat_id: str, enabled: bool) -> None:
+    data = _load()
+    chat = _ensure_chat(data, chat_id)
+    chat["reminder"] = enabled
+    _save(data)
+
+
+def get_reminder(chat_id: str) -> bool:
+    """Return whether the 11pm reminder is enabled (default True)."""
+    return get_chat(chat_id).get("reminder", True)
 
 
 def save_snapshot(
@@ -136,3 +164,56 @@ def load_snapshots(chat_id: str, date_str: str) -> dict[str, dict]:
             result[username] = data
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Credentials – per Telegram user, stored in credentials.json
+# ---------------------------------------------------------------------------
+
+def _load_credentials() -> dict:
+    if not os.path.exists(CREDENTIALS_FILE):
+        return {}
+    try:
+        with open(CREDENTIALS_FILE) as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        logger.exception("Failed to load credentials file")
+        return {}
+
+
+def _save_credentials(data: dict) -> None:
+    with open(CREDENTIALS_FILE, "w") as f:
+        json.dump(data, f, indent=2)
+
+
+def save_user_credentials(
+    telegram_user_id: int,
+    leetcode_session: str,
+    csrftoken: str,
+    username: str,
+) -> None:
+    """Store LeetCode credentials for a Telegram user."""
+    data = _load_credentials()
+    data[str(telegram_user_id)] = {
+        "leetcode_session": leetcode_session,
+        "csrftoken": csrftoken,
+        "username": username,
+    }
+    _save_credentials(data)
+
+
+def get_user_credentials(telegram_user_id: int) -> Optional[dict]:
+    """Return credentials dict or None if not logged in."""
+    data = _load_credentials()
+    return data.get(str(telegram_user_id))
+
+
+def delete_user_credentials(telegram_user_id: int) -> bool:
+    """Remove stored credentials. Returns False if not found."""
+    data = _load_credentials()
+    key = str(telegram_user_id)
+    if key not in data:
+        return False
+    del data[key]
+    _save_credentials(data)
+    return True

@@ -14,12 +14,15 @@ import httpx
 import storage
 from config import (
     DAILY_CHALLENGE_QUERY,
-    FETCH_DELAY_SECONDS,
+    GLOBAL_DATA_QUERY,
     LEETCODE_GRAPHQL_URL,
     PROBLEM_CACHE_FILE,
     PROBLEM_DETAIL_QUERY,
+    PROBLEM_STATUS_QUERY,
     PROBLEMS_QUERY,
+    RECENT_AC_SUBMISSIONS_QUERY,
     SOLUTION_CACHE_FILE,
+    STATUS_CODES,
     USER_PROFILE_QUERY,
 )
 
@@ -179,6 +182,48 @@ async def fetch_user_profile(username: str) -> Optional[dict]:
         return None
 
 
+async def fetch_recent_ac_submissions(username: str, limit: int = 200) -> Optional[list[dict]]:
+    """Fetch a user's recent accepted submissions (deduplicated, most recent AC per problem).
+
+    Returns list of dicts with keys: id, title, titleSlug, timestamp.
+    Returns None on failure.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                LEETCODE_GRAPHQL_URL,
+                json={
+                    "query": RECENT_AC_SUBMISSIONS_QUERY,
+                    "variables": {"username": username, "limit": limit},
+                },
+                headers={
+                    "Content-Type": "application/json",
+                    "Referer": "https://leetcode.com",
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json().get("data", {})
+            return data.get("recentAcSubmissionList")
+    except Exception:
+        logger.exception("Failed to fetch AC submissions for %s", username)
+        return None
+
+
+async def fetch_all_users_ac(
+    usernames: list[str], limit: int = 200, max_concurrent: int = 10,
+) -> dict[str, Optional[list[dict]]]:
+    """Fetch AC submissions for multiple users concurrently."""
+    semaphore = asyncio.Semaphore(max_concurrent)
+
+    async def _fetch(username: str) -> tuple[str, Optional[list[dict]]]:
+        async with semaphore:
+            return username, await fetch_recent_ac_submissions(username, limit)
+
+    tasks = [_fetch(u) for u in usernames]
+    pairs = await asyncio.gather(*tasks)
+    return {username: subs for username, subs in pairs}
+
+
 def _today_str(tz: ZoneInfo) -> str:
     return datetime.now(tz).strftime("%Y-%m-%d")
 
@@ -212,6 +257,33 @@ def get_week_snapshot(chat_id: str, username: str, tz: ZoneInfo) -> Optional[dic
         if snapshots and username in snapshots:
             return snapshots[username]
     return None
+
+
+def get_month_snapshot(chat_id: str, username: str, tz: ZoneInfo) -> Optional[dict]:
+    """Find the oldest snapshot on or after the 1st of the current month for the user.
+
+    Returns dict with 'counts' and 'timestamp' keys, or None.
+    """
+    now = datetime.now(tz)
+    first_of_month = now.date().replace(day=1)
+    days_in_month = (now.date() - first_of_month).days
+    for days_back in range(days_in_month, -1, -1):
+        date_str = (now.date() - timedelta(days=days_back)).strftime("%Y-%m-%d")
+        snapshots = storage.load_snapshots(chat_id, date_str)
+        if snapshots and username in snapshots:
+            return snapshots[username]
+    return None
+
+
+def filter_month_accepted(ac_submissions: list[dict], month_start_ts: int) -> list[dict]:
+    """Return accepted submissions from month_start_ts onwards.
+
+    Input is from recentAcSubmissionList (already deduplicated and AC-only).
+    """
+    return [
+        sub for sub in ac_submissions
+        if int(sub.get("timestamp", 0)) >= month_start_ts
+    ]
 
 
 def compute_diff(current: dict[str, int], snapshot: dict[str, int]) -> dict[str, int]:
@@ -345,14 +417,35 @@ def get_week_daily_counts(
     return result
 
 
-async def fetch_all_users(usernames: list[str]) -> dict[str, Optional[dict]]:
-    """Fetch profiles for multiple users with rate-limiting delay."""
-    results = {}
-    for i, username in enumerate(usernames):
-        if i > 0:
-            await asyncio.sleep(FETCH_DELAY_SECONDS)
-        results[username] = await fetch_user_profile(username)
-    return results
+async def fetch_all_users(usernames: list[str], max_concurrent: int = 10) -> dict[str, Optional[dict]]:
+    """Fetch profiles for multiple users concurrently with rate limiting."""
+    semaphore = asyncio.Semaphore(max_concurrent)
+
+    async def _fetch(username: str) -> tuple[str, Optional[dict]]:
+        async with semaphore:
+            return username, await fetch_user_profile(username)
+
+    tasks = [_fetch(u) for u in usernames]
+    pairs = await asyncio.gather(*tasks)
+    return {username: profile for username, profile in pairs}
+
+
+SUPERSCRIPT_MAP = {
+    '0': '\u2070', '1': '\u00B9', '2': '\u00B2', '3': '\u00B3',
+    '4': '\u2074', '5': '\u2075', '6': '\u2076', '7': '\u2077',
+    '8': '\u2078', '9': '\u2079',
+    '-': '\u207B', '+': '\u207A',
+    'n': '\u207F', 'i': '\u2071',
+}
+
+
+def _to_superscript(text: str) -> str:
+    """Convert text to Unicode superscript characters.
+
+    Maps digits 0-9, plus, minus, n, and i to their Unicode superscript
+    equivalents. Characters without a superscript mapping are kept as-is.
+    """
+    return ''.join(SUPERSCRIPT_MAP.get(c, c) for c in text)
 
 
 def _strip_html(text: str) -> str:
@@ -361,14 +454,17 @@ def _strip_html(text: str) -> str:
     The order matters! If we unescape first, &lt;= becomes real < which then gets
     matched by the HTML-stripping regex <[^>]+> as a fake tag, truncating content.
     So we:
-    1. Convert <sup> to ^n notation (preserves exponents)
-    2. Process code blocks and inline code
-    3. Strip remaining HTML tags (safe — no unescaped < yet)
-    4. THEN unescape entities (&lt; → <, etc.)
+    1. Replace &nbsp; with regular space (safe, never part of tag structure)
+    2. Convert <sup> to Unicode superscript characters (preserves exponents)
+    3. Process code blocks and inline code
+    4. Strip remaining HTML tags (safe — no unescaped < yet)
+    5. THEN unescape entities (&lt; → <, etc.)
     """
     text = text or ""
-    # FIRST: Convert <sup> to ^n notation before anything else (e.g. 10<sup>4</sup> → 10^4)
-    text = re.sub(r'<sup>(.*?)</sup>', r'^\1', text, flags=re.DOTALL)
+    # Replace &nbsp; with regular space before any tag processing
+    text = text.replace('&nbsp;', ' ')
+    # Convert <sup> to Unicode superscript (e.g. 10<sup>4</sup> → 10⁴)
+    text = re.sub(r'<sup>(.*?)</sup>', lambda m: _to_superscript(m.group(1)), text, flags=re.DOTALL)
     # Replace code blocks: <pre><code>...</code></pre> → ```...```
     text = re.sub(r'<pre><code>(.*?)</code></pre>', r'```\1```', text, flags=re.DOTALL)
     # Replace inline code: <code>...</code> → `...`
@@ -688,13 +784,21 @@ async def fetch_problems(
         return None
 
 
-async def fetch_problem(slug: str) -> Optional[dict]:
-    """Fetch full detail for a single problem by slug, using local cache."""
+async def fetch_problem(slug: str, require_snippets: bool = False) -> Optional[dict]:
+    """Fetch full detail for a single problem by slug, using local cache.
+
+    If require_snippets is True, re-fetch from API if the cached entry
+    is missing questionId or codeSnippets (stale cache from before these
+    fields were added to the query).
+    """
     normalized = slug.lower().replace(" ", "-")
 
     cached = _get_cached_problem(normalized)
     if cached is not None:
-        return cached
+        if require_snippets and ("questionId" not in cached or "codeSnippets" not in cached):
+            pass  # Force re-fetch below
+        else:
+            return cached
 
     try:
         async with httpx.AsyncClient(timeout=15) as client:
@@ -731,3 +835,203 @@ async def fetch_daily_challenge() -> Optional[dict]:
     except Exception:
         logger.exception("Failed to fetch daily challenge")
         return None
+
+
+# ---------------------------------------------------------------------------
+# Authenticated LeetCode API helpers
+# ---------------------------------------------------------------------------
+
+def _auth_headers(csrftoken: str) -> dict[str, str]:
+    return {
+        "Content-Type": "application/json",
+        "Referer": "https://leetcode.com",
+        "X-CSRFToken": csrftoken,
+    }
+
+
+def _auth_cookies(leetcode_session: str, csrftoken: str) -> dict[str, str]:
+    return {
+        "LEETCODE_SESSION": leetcode_session,
+        "csrftoken": csrftoken,
+    }
+
+
+async def validate_credentials(leetcode_session: str, csrftoken: str) -> Optional[str]:
+    """Validate LeetCode credentials by checking the authenticated user status.
+
+    Returns the LeetCode username on success, None on failure.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                LEETCODE_GRAPHQL_URL,
+                json={"query": GLOBAL_DATA_QUERY},
+                headers=_auth_headers(csrftoken),
+                cookies=_auth_cookies(leetcode_session, csrftoken),
+            )
+            resp.raise_for_status()
+            data = resp.json().get("data", {})
+            user_status = data.get("userStatus", {})
+            if user_status.get("isSignedIn"):
+                return user_status.get("username")
+            return None
+    except Exception:
+        logger.exception("Failed to validate credentials")
+        return None
+
+
+async def fetch_problem_status(
+    slug: str, leetcode_session: str, csrftoken: str,
+) -> Optional[str]:
+    """Fetch the authenticated user's solve status for a problem.
+
+    Returns "ac", "notac", or None.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                LEETCODE_GRAPHQL_URL,
+                json={"query": PROBLEM_STATUS_QUERY, "variables": {"titleSlug": slug}},
+                headers=_auth_headers(csrftoken),
+                cookies=_auth_cookies(leetcode_session, csrftoken),
+            )
+            resp.raise_for_status()
+            data = resp.json().get("data", {})
+            question = data.get("question")
+            if question:
+                return question.get("status")
+            return None
+    except Exception:
+        logger.exception("Failed to fetch problem status for %s", slug)
+        return None
+
+
+async def fetch_problems_status(
+    slugs: list[str], leetcode_session: str, csrftoken: str,
+) -> dict[str, str]:
+    """Batch-fetch solve status for multiple problems using aliased GraphQL.
+
+    Returns {slug: status} where status is "ac", "notac", or absent.
+    """
+    if not slugs:
+        return {}
+    aliases = "\n".join(
+        f'  q{i}: question(titleSlug: "{slug}") {{ status }}'
+        for i, slug in enumerate(slugs)
+    )
+    query = f"query {{\n{aliases}\n}}"
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                LEETCODE_GRAPHQL_URL,
+                json={"query": query},
+                headers=_auth_headers(csrftoken),
+                cookies=_auth_cookies(leetcode_session, csrftoken),
+            )
+            resp.raise_for_status()
+            data = resp.json().get("data", {})
+            result = {}
+            for i, slug in enumerate(slugs):
+                q = data.get(f"q{i}")
+                if q and q.get("status"):
+                    result[slug] = q["status"]
+            return result
+    except Exception:
+        logger.exception("Failed to fetch problems status")
+        return {}
+
+
+async def interpret_solution(
+    slug: str,
+    question_id: str,
+    lang: str,
+    typed_code: str,
+    data_input: str,
+    leetcode_session: str,
+    csrftoken: str,
+) -> Optional[str]:
+    """Submit code for testing against example test cases.
+
+    Returns interpret_id on success, None on failure.
+    """
+    url = f"https://leetcode.com/problems/{slug}/interpret_solution/"
+    payload = {
+        "question_id": question_id,
+        "lang": lang,
+        "typed_code": typed_code,
+        "data_input": data_input,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                url,
+                json=payload,
+                headers=_auth_headers(csrftoken),
+                cookies=_auth_cookies(leetcode_session, csrftoken),
+            )
+            resp.raise_for_status()
+            return resp.json().get("interpret_id")
+    except Exception:
+        logger.exception("Failed to interpret solution for %s", slug)
+        return None
+
+
+async def submit_solution(
+    slug: str,
+    question_id: str,
+    lang: str,
+    typed_code: str,
+    leetcode_session: str,
+    csrftoken: str,
+) -> Optional[int]:
+    """Submit code to LeetCode for judging.
+
+    Returns submission_id on success, None on failure.
+    """
+    url = f"https://leetcode.com/problems/{slug}/submit/"
+    payload = {
+        "question_id": question_id,
+        "lang": lang,
+        "typed_code": typed_code,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                url,
+                json=payload,
+                headers=_auth_headers(csrftoken),
+                cookies=_auth_cookies(leetcode_session, csrftoken),
+            )
+            resp.raise_for_status()
+            return resp.json().get("submission_id")
+    except Exception:
+        logger.exception("Failed to submit solution for %s", slug)
+        return None
+
+
+async def check_result(
+    submission_id, leetcode_session: str, csrftoken: str,
+    max_polls: int = 20, interval: float = 1.5,
+) -> Optional[dict]:
+    """Poll for test/submit results until complete or timeout.
+
+    Returns the result dict on success, None on timeout.
+    """
+    url = f"https://leetcode.com/submissions/detail/{submission_id}/check/"
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            for _ in range(max_polls):
+                resp = await client.get(
+                    url,
+                    headers={"Referer": "https://leetcode.com"},
+                    cookies=_auth_cookies(leetcode_session, csrftoken),
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                state = data.get("state")
+                if state == "SUCCESS":
+                    return data
+                await asyncio.sleep(interval)
+    except Exception:
+        logger.exception("Failed to check result for %s", submission_id)
+    return None
