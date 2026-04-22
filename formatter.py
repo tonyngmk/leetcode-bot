@@ -1095,7 +1095,7 @@ def format_solution_detail(slug: str, approach: dict, language: str) -> str:
     code = approach.get("code", {}).get(language, "")
     lang_display = LANGUAGE_DISPLAY.get(language, language)
 
-    lines = [f"💡 <b>Solution: {_html_escape(slug)}</b> · <code>{_html_escape(lang_display)}</code>"]
+    lines = [f"💡 <b>Solution: <code>{_html_escape(slug)}</code></b> · <code>{_html_escape(lang_display)}</code>"]
     lines.append(f"<b>Approach:</b> {name}")
 
     if explanation:

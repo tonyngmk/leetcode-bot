@@ -1,10 +1,21 @@
 import asyncio
 import logging
+import os
 import shlex
 import time as _time_mod
 from datetime import datetime, time
 from typing import Optional
 from zoneinfo import ZoneInfo
+
+# Load .env before importing config
+_env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+if os.path.exists(_env_path):
+    with open(_env_path) as f:
+        for line in f:
+            line = line.strip()
+            if line and "=" in line and not line.startswith("#"):
+                key, value = line.split("=", 1)
+                os.environ.setdefault(key, value)
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
@@ -301,6 +312,19 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     # Normal /start → show help
     await cmd_help(update, context)
+
+
+async def cmd_debug(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Debug command to show chat info."""
+    chat_id = _chat_id(update)
+    users = storage.get_users(chat_id)
+    stored_chats = list(storage.get_all_chats().keys())
+    await update.message.reply_text(
+        f"Debug info:\n"
+        f"- This chat_id: {chat_id}\n"
+        f"- Users in this chat: {users}\n"
+        f"- All stored chats: {stored_chats}\n"
+    )
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1059,6 +1083,21 @@ async def cmd_solution(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await update.message.reply_text(text, parse_mode="HTML", disable_web_page_preview=True, reply_markup=keyboard)
 
 
+async def cmd_challenge(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    challenge = await fetch_daily_challenge()
+    if challenge is None:
+        await update.message.reply_text("Failed to fetch daily challenge.")
+        return
+
+    text = format_daily_challenge(challenge)
+    await update.message.reply_text(text, parse_mode="HTML", disable_web_page_preview=True)
+
+    question = challenge.get("question", {})
+    content = question.get("content", "")
+    await _send_problem_images(update, content)
+
+
+# /solution callback handler
 async def cmd_solution_nav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle approach/language button presses for /solution."""
     query = update.callback_query
@@ -1081,21 +1120,192 @@ async def cmd_solution_nav(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     try:
         await query.edit_message_text(text, parse_mode="HTML", disable_web_page_preview=True, reply_markup=keyboard)
     except Exception:
-        pass  # Ignore "Message is not modified" on same-button taps
+        pass
 
 
-async def cmd_challenge(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    challenge = await fetch_daily_challenge()
-    if challenge is None:
-        await update.message.reply_text("Failed to fetch daily challenge.")
+# /visualise command with step navigation
+# ---------------------------------------------------------------------------
+
+def _encode_visualise_callback(slug: str, approach_idx: int, step_idx: int) -> str:
+    """Encode visualisation nav state: `v:<slug>:<approach_idx>:<step_idx>`."""
+    return f"v:{slug}:{approach_idx}:{step_idx}"
+
+
+def _decode_visualise_callback(data: str) -> tuple:
+    """Parse callback: (slug, approach_idx, step_idx)."""
+    parts = data.split(":", 3)
+    return parts[1], int(parts[2]), int(parts[3])
+
+
+def _format_visualisation_step(slug: str, approach: dict, approach_idx: int, step_idx: int) -> str:
+    """Format a single visualisation step with array visualization."""
+    vis = approach.get("visualisation", {})
+    if not vis:
+        return "No visualisation available for this approach."
+
+    steps = vis.get("steps", [])
+    if step_idx < 0 or step_idx >= len(steps):
+        return "Invalid step."
+
+    step = steps[step_idx]
+    step_text = step.get("text", "")
+    highlight = step.get("highlight", [])
+    result = step.get("result")
+    vis_map = step.get("map", {})
+    pass_desc = step.get("pass")  # Description of current pass
+
+    lines = []
+    lines.append(f"🔍 <b>{_esc(approach.get('name', 'Approach'))}</b>")
+
+    explanation = approach.get("explanation", "")
+    if explanation:
+        lines.append(f"_{explanation}_")
+        lines.append("")
+
+    lines.append(f"Step {step_idx + 1}/{len(steps)}")
+    lines.append("")
+
+    input_data = vis.get("input", {})
+    nums = input_data.get("nums", [])
+    target = input_data.get("target")
+
+    if nums:
+        arr_display = []
+        for i, num in enumerate(nums):
+            if i in highlight:
+                arr_display.append(f"[<b>{num}</b>]")
+            else:
+                arr_display.append(f"[{num}]")
+        lines.append("Array: " + " ".join(arr_display))
+        if target is not None:
+            lines.append(f"Target: {target}")
+        lines.append("")
+
+    if vis_map:
+        map_parts = [f"{k}→{v}" for k, v in vis_map.items()]
+        lines.append(f"Map: {{{', '.join(map_parts)}}}")
+        lines.append("")
+
+    if pass_desc:
+        lines.append(f"📌 <b>Pass:</b> {pass_desc}")
+        lines.append("")
+
+    lines.append(step_text)
+
+    if result is not None:
+        lines.append("")
+        lines.append(f"<b>✓ Result: {result}</b>")
+
+    total_steps = len(steps)
+    nav_hints = []
+    if step_idx > 0:
+        nav_hints.append("⬅ Prev")
+    if step_idx < total_steps - 1:
+        nav_hints.append("Next ➡")
+    if nav_hints:
+        lines.append("")
+        lines.append(" ".join(nav_hints))
+
+    return "\n".join(lines)
+
+
+def _build_visualise_keyboard(slug: str, approaches: list[dict], approach_idx: int, step_idx: int) -> InlineKeyboardMarkup:
+    """Build approach + step navigation keyboard."""
+    current_approach = approaches[approach_idx] if approach_idx < len(approaches) else {}
+    vis = current_approach.get("visualisation", {})
+    steps = vis.get("steps", []) if vis else []
+
+    rows = []
+
+    if len(approaches) > 1:
+        approach_buttons = []
+        for i, approach in enumerate(approaches):
+            name = approach.get("name", f"Approach {i + 1}")[:18]
+            label = f"✓ {name}" if i == approach_idx else name
+            approach_buttons.append(
+                InlineKeyboardButton(label, callback_data=_encode_visualise_callback(slug, i, 0))
+            )
+        rows.append(approach_buttons)
+
+    if steps:
+        step_buttons = []
+        if step_idx > 0:
+            step_buttons.append(
+                InlineKeyboardButton("⬅ Prev", callback_data=_encode_visualise_callback(slug, approach_idx, step_idx - 1))
+            )
+        if step_idx < len(steps) - 1:
+            step_buttons.append(
+                InlineKeyboardButton("Next ➡", callback_data=_encode_visualise_callback(slug, approach_idx, step_idx + 1))
+            )
+        if step_buttons:
+            rows.append(step_buttons)
+
+    return InlineKeyboardMarkup(rows) if rows else None
+
+
+async def cmd_visualise(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not context.args:
+        await update.message.reply_text("Usage: /visualise <title-slug>  e.g. /visualise two-sum")
         return
 
-    text = format_daily_challenge(challenge)
-    await update.message.reply_text(text, parse_mode="HTML", disable_web_page_preview=True)
+    slug = context.args[0].lower().replace(" ", "-")
+    solution_data = get_cached_solution(slug)
+    if solution_data is None:
+        await update.message.reply_text(f"Visualisation for '{slug}' does not exist.")
+        return
 
-    question = challenge.get("question", {})
-    content = question.get("content", "")
-    await _send_problem_images(update, content)
+    approaches = solution_data.get("approaches", [])
+    if not approaches:
+        await update.message.reply_text(f"No approaches available for '{slug}'.")
+        return
+
+    first_with_vis = None
+    for i, approach in enumerate(approaches):
+        if approach.get("visualisation"):
+            first_with_vis = i
+            break
+
+    if first_with_vis is None:
+        await update.message.reply_text(f"No visualisation available for '{slug}' yet.")
+        return
+
+    approach_idx = first_with_vis
+    approach = approaches[approach_idx]
+    text = _format_visualisation_step(slug, approach, approach_idx, 0)
+    keyboard = _build_visualise_keyboard(slug, approaches, approach_idx, 0)
+    await update.message.reply_text(text, parse_mode="HTML", disable_web_page_preview=True, reply_markup=keyboard)
+
+
+async def cmd_visualise_nav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle step navigation button presses for /visualise."""
+    query = update.callback_query
+    await query.answer()
+
+    slug, approach_idx, step_idx = _decode_visualise_callback(query.data)
+    solution_data = get_cached_solution(slug)
+    if solution_data is None:
+        await query.answer("Visualisation no longer available.", show_alert=True)
+        return
+
+    approaches = solution_data.get("approaches", [])
+    if approach_idx >= len(approaches):
+        await query.answer("Invalid approach.", show_alert=True)
+        return
+
+    approach = approaches[approach_idx]
+    vis = approach.get("visualisation", {})
+    steps = vis.get("steps", []) if vis else []
+
+    if step_idx < 0 or step_idx >= len(steps):
+        await query.answer("Invalid step.", show_alert=True)
+        return
+
+    text = _format_visualisation_step(slug, approach, approach_idx, step_idx)
+    keyboard = _build_visualise_keyboard(slug, approaches, approach_idx, step_idx)
+    try:
+        await query.edit_message_text(text, parse_mode="HTML", disable_web_page_preview=True, reply_markup=keyboard)
+    except Exception:
+        pass
 
 
 # --- Startup ---
@@ -1156,6 +1366,7 @@ def main() -> None:
 
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
+    app.add_handler(CommandHandler("debug", cmd_debug))
     app.add_handler(CommandHandler("login", cmd_login))
     app.add_handler(CommandHandler("logout", cmd_logout))
     app.add_handler(CommandHandler("add_user", cmd_add_user))
@@ -1174,6 +1385,8 @@ def main() -> None:
     app.add_handler(CommandHandler("challenge", cmd_challenge))
     app.add_handler(CommandHandler("solution", cmd_solution))
     app.add_handler(CallbackQueryHandler(cmd_solution_nav, pattern=r"^s:"))
+    app.add_handler(CommandHandler("visualise", cmd_visualise))
+    app.add_handler(CallbackQueryHandler(cmd_visualise_nav, pattern=r"^v:"))
 
     logger.info("Bot starting...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
