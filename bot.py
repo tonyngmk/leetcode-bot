@@ -1196,16 +1196,6 @@ def _format_visualisation_step(slug: str, approach: dict, approach_idx: int, ste
         lines.append("")
         lines.append(f"<b>✓ Result: {result}</b>")
 
-    total_steps = len(steps)
-    nav_hints = []
-    if step_idx > 0:
-        nav_hints.append("⬅ Prev")
-    if step_idx < total_steps - 1:
-        nav_hints.append("Next ➡")
-    if nav_hints:
-        lines.append("")
-        lines.append(" ".join(nav_hints))
-
     return "\n".join(lines)
 
 
