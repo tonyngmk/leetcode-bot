@@ -1160,11 +1160,13 @@ def _format_visualisation_step(slug: str, approach: dict, approach_idx: int, ste
     lines = []
     lines.append(f"💡 <b>Visualise:</b> <code>{_esc(slug)}</code>")
     lines.append(f"<b>Approach:</b> {_esc(approach.get('name', 'Approach'))}")
+    lines.append("")
 
     explanation = approach.get("explanation", "")
     if explanation:
         lines.append(_esc(explanation))
 
+    lines.append("")
     lines.append(f"Step {step_idx + 1}/{len(steps)}")
 
     input_data = vis.get("input", {})
