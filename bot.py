@@ -1152,18 +1152,20 @@ def _format_visualisation_step(slug: str, approach: dict, approach_idx: int, ste
     highlight = step.get("highlight", [])
     result = step.get("result")
     vis_map = step.get("map", {})
-    pass_desc = step.get("pass")  # Description of current pass
+    pass_desc = step.get("pass")
+
+    time_complexity = approach.get("time_complexity", "")
+    space_complexity = approach.get("space_complexity", "")
 
     lines = []
-    lines.append(f"🔍 <b>{_esc(approach.get('name', 'Approach'))}</b>")
+    lines.append(f"💡 <b>Solution:</b> <code>{_esc(slug)}</code> · Visualise")
+    lines.append(f"Approach: <b>{_esc(approach.get('name', 'Approach'))}</b>")
 
     explanation = approach.get("explanation", "")
     if explanation:
         lines.append(f"_{explanation}_")
-        lines.append("")
 
     lines.append(f"Step {step_idx + 1}/{len(steps)}")
-    lines.append("")
 
     input_data = vis.get("input", {})
     nums = input_data.get("nums", [])
@@ -1179,22 +1181,33 @@ def _format_visualisation_step(slug: str, approach: dict, approach_idx: int, ste
         lines.append("Array: " + " ".join(arr_display))
         if target is not None:
             lines.append(f"Target: {target}")
-        lines.append("")
 
     if vis_map:
         map_parts = [f"{k}→{v}" for k, v in vis_map.items()]
         lines.append(f"Map: {{{', '.join(map_parts)}}}")
-        lines.append("")
 
     if pass_desc:
         lines.append(f"📌 <b>Pass:</b> {pass_desc}")
-        lines.append("")
+
+    lines.append("")
 
     lines.append(step_text)
 
     if result is not None:
         lines.append("")
         lines.append(f"<b>✓ Result: {result}</b>")
+
+    if time_complexity or space_complexity:
+        parts = []
+        if time_complexity:
+            parts.append(f"Time: {time_complexity}")
+        if space_complexity:
+            parts.append(f"Space: {space_complexity}")
+        lines.append("")
+        lines.append(" · ".join(parts))
+
+    lines.append("")
+    lines.append(f"<a href=\"https://leetcode.com/problems/{slug}/\">Open on LeetCode</a>")
 
     return "\n".join(lines)
 
