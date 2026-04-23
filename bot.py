@@ -1197,14 +1197,14 @@ def _format_visualisation_step(slug: str, approach: dict, approach_idx: int, ste
 
     if result is not None:
         lines.append("")
-        lines.append(f"<b>✓ Result: {result}</b>")
+        lines.append(f"<b>Result:</b> {result}")
 
     if time_complexity or space_complexity:
         parts = []
         if time_complexity:
-            parts.append(f"Time: {time_complexity}")
+            parts.append(f"Time: <code>{time_complexity}</code>")
         if space_complexity:
-            parts.append(f"Space: {space_complexity}")
+            parts.append(f"Space: <code>{space_complexity}</code>")
         lines.append(" · ".join(parts))
 
     lines.append("")
