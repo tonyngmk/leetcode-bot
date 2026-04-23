@@ -1158,7 +1158,7 @@ def _format_visualisation_step(slug: str, approach: dict, approach_idx: int, ste
     space_complexity = approach.get("space_complexity", "")
 
     lines = []
-    lines.append(f"💡 <b>Solution:</b> <code>{_esc(slug)}</code> · Visualise")
+    lines.append(f"💡 <b>Visualise:</b> <code>{_esc(slug)}</code>")
     lines.append(f"Approach: <b>{_esc(approach.get('name', 'Approach'))}</b>")
 
     explanation = approach.get("explanation", "")
