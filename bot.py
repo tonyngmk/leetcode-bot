@@ -1161,14 +1161,17 @@ def _format_visualisation_step(slug: str, approach: dict, approach_idx: int, ste
     lines = []
     lines.append(f"💡 <b>Visualise:</b> <code>{_html_escape(slug)}</code>")
     lines.append(f"<b>Approach:</b> {_html_escape(approach.get('name', 'Approach'))}")
-    lines.append("")
 
     explanation = approach.get("explanation", "")
     if explanation:
+        lines.append("")
         lines.append(_html_escape(explanation))
 
+    lines.append("")
+    lines.append(f"Step {step_idx + 1}/{len(steps)}")
+
     code_lines = []
-    code_lines.append(step_text)
+    code_lines.append(f"→ {step_text}")
 
     input_data = vis.get("input", {})
     nums = input_data.get("nums", [])
@@ -1177,10 +1180,7 @@ def _format_visualisation_step(slug: str, approach: dict, approach_idx: int, ste
     if nums:
         arr_display = []
         for i, num in enumerate(nums):
-            if i in highlight:
-                arr_display.append(f"[<b>{num}</b>]")
-            else:
-                arr_display.append(f"[{num}]")
+            arr_display.append(f"{num}")
         code_lines.append("Array: " + " ".join(arr_display))
         if target is not None:
             code_lines.append(f"Target: {target}")
@@ -1189,13 +1189,10 @@ def _format_visualisation_step(slug: str, approach: dict, approach_idx: int, ste
         map_parts = [f"{k}→{v}" for k, v in vis_map.items()]
         code_lines.append(f"Map: {{{', '.join(map_parts)}}}")
 
-    lines.append(f"<pre><code>{chr(10).join(code_lines)}</code></pre>")
-
     if pass_desc:
-        lines.append(f"<b>Pass:</b> {pass_desc}")
+        code_lines.append(f"Pass: {pass_desc}")
 
-    lines.append("")
-    lines.append(f"Step {step_idx + 1}/{len(steps)}")
+    lines.append(f"<pre><code>{chr(10).join(code_lines)}</code></pre>")
 
     if result is not None:
         lines.append("")
@@ -1207,6 +1204,7 @@ def _format_visualisation_step(slug: str, approach: dict, approach_idx: int, ste
             parts.append(f"Time: <code>{time_complexity}</code>")
         if space_complexity:
             parts.append(f"Space: <code>{space_complexity}</code>")
+        lines.append("")
         lines.append(" · ".join(parts))
 
     lines.append("")
