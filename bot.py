@@ -36,6 +36,7 @@ from config import LEETCODE_LANG_SLUGS
 from formatter import (
     LANGUAGE_DISPLAY,
     _esc,
+    _html_escape,
     format_code_prompt,
     format_daily,
     format_daily_challenge,
@@ -1158,13 +1159,13 @@ def _format_visualisation_step(slug: str, approach: dict, approach_idx: int, ste
     space_complexity = approach.get("space_complexity", "")
 
     lines = []
-    lines.append(f"💡 <b>Visualise:</b> <code>{_esc(slug)}</code>")
-    lines.append(f"<b>Approach:</b> {_esc(approach.get('name', 'Approach'))}")
+    lines.append(f"💡 <b>Visualise:</b> <code>{_html_escape(slug)}</code>")
+    lines.append(f"<b>Approach:</b> {_html_escape(approach.get('name', 'Approach'))}")
     lines.append("")
 
     explanation = approach.get("explanation", "")
     if explanation:
-        lines.append(_esc(explanation))
+        lines.append(_html_escape(explanation))
 
     lines.append("")
     lines.append(f"Step {step_idx + 1}/{len(steps)}")
