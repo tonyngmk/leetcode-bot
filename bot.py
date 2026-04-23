@@ -1159,11 +1159,11 @@ def _format_visualisation_step(slug: str, approach: dict, approach_idx: int, ste
 
     lines = []
     lines.append(f"💡 <b>Visualise:</b> <code>{_esc(slug)}</code>")
-    lines.append(f"Approach: <b>{_esc(approach.get('name', 'Approach'))}</b>")
+    lines.append(f"<b>Approach:</b> {_esc(approach.get('name', 'Approach'))}")
 
     explanation = approach.get("explanation", "")
     if explanation:
-        lines.append(f"_{explanation}_")
+        lines.append(_esc(explanation))
 
     lines.append(f"Step {step_idx + 1}/{len(steps)}")
 
@@ -1187,7 +1187,7 @@ def _format_visualisation_step(slug: str, approach: dict, approach_idx: int, ste
         lines.append(f"Map: {{{', '.join(map_parts)}}}")
 
     if pass_desc:
-        lines.append(f"📌 <b>Pass:</b> {pass_desc}")
+        lines.append(f"<b>Pass:</b> {pass_desc}")
 
     lines.append("")
 
@@ -1203,7 +1203,6 @@ def _format_visualisation_step(slug: str, approach: dict, approach_idx: int, ste
             parts.append(f"Time: {time_complexity}")
         if space_complexity:
             parts.append(f"Space: {space_complexity}")
-        lines.append("")
         lines.append(" · ".join(parts))
 
     lines.append("")
