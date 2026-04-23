@@ -1180,7 +1180,10 @@ def _format_visualisation_step(slug: str, approach: dict, approach_idx: int, ste
     if nums:
         arr_display = []
         for i, num in enumerate(nums):
-            arr_display.append(f"{num}")
+            if i in highlight:
+                arr_display.append(f"^{num}")
+            else:
+                arr_display.append(f" {num} ")
         code_lines.append("Array: " + " ".join(arr_display))
         if target is not None:
             code_lines.append(f"Target: {target}")
