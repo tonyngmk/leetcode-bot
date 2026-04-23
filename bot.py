@@ -1178,13 +1178,12 @@ def _format_visualisation_step(slug: str, approach: dict, approach_idx: int, ste
     target = input_data.get("target")
 
     if nums:
-        arr_display = []
-        for i, num in enumerate(nums):
-            if i in highlight:
-                arr_display.append(f"^{num}")
-            else:
-                arr_display.append(f" {num} ")
-        code_lines.append("Array: " + " ".join(arr_display))
+        idx_line = "  ".join(str(i) for i in range(len(nums)))
+        val_line = "  ".join(str(n) for n in nums)
+        ptr_line = "  ".join(" ^ " if i in highlight else "   " for i in range(len(nums)))
+        code_lines.append("Index: " + idx_line)
+        code_lines.append("Value: " + val_line)
+        code_lines.append("       " + ptr_line)
         if target is not None:
             code_lines.append(f"Target: {target}")
 
