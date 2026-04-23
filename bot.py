@@ -1167,8 +1167,8 @@ def _format_visualisation_step(slug: str, approach: dict, approach_idx: int, ste
     if explanation:
         lines.append(_html_escape(explanation))
 
-    lines.append("")
-    lines.append(f"Step {step_idx + 1}/{len(steps)}")
+    code_lines = []
+    code_lines.append(step_text)
 
     input_data = vis.get("input", {})
     nums = input_data.get("nums", [])
@@ -1181,20 +1181,21 @@ def _format_visualisation_step(slug: str, approach: dict, approach_idx: int, ste
                 arr_display.append(f"[<b>{num}</b>]")
             else:
                 arr_display.append(f"[{num}]")
-        lines.append("Array: " + " ".join(arr_display))
+        code_lines.append("Array: " + " ".join(arr_display))
         if target is not None:
-            lines.append(f"Target: {target}")
+            code_lines.append(f"Target: {target}")
 
     if vis_map:
         map_parts = [f"{k}→{v}" for k, v in vis_map.items()]
-        lines.append(f"Map: {{{', '.join(map_parts)}}}")
+        code_lines.append(f"Map: {{{', '.join(map_parts)}}}")
+
+    lines.append(f"<pre><code>{chr(10).join(code_lines)}</code></pre>")
 
     if pass_desc:
         lines.append(f"<b>Pass:</b> {pass_desc}")
 
     lines.append("")
-
-    lines.append(step_text)
+    lines.append(f"Step {step_idx + 1}/{len(steps)}")
 
     if result is not None:
         lines.append("")
